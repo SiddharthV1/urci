@@ -10,7 +10,7 @@ CREATE TABLE "slasher_commitment" (
 );
 
 
-ALTER TABLE "slasher_commitment" ADD FOREIGN KEY ("commiter_id") REFERENCES "commiter" ("id");
+ALTER TABLE "slasher_commitment" ADD FOREIGN KEY ("commiter_id") REFERENCES "committer" ("id");
 
 ALTER TABLE "slasher_commitment" ADD FOREIGN KEY ("writer_id") REFERENCES "writers" ("id");
 
@@ -36,7 +36,7 @@ ALTER TABLE "operator_slasher_commitments" ADD FOREIGN KEY ("operator_id") REFER
 
 ALTER TABLE "operator_slasher_commitments" ADD FOREIGN KEY ("slasher_id") REFERENCES "slasher" ("id");
 
-ALTER TABLE "operator_slasher_commitments" ADD FOREIGN KEY ("slasher_commitment_id") REFERENCES "commiter" ("id");
+ALTER TABLE "operator_slasher_commitments" ADD FOREIGN KEY ("slasher_commitment_id") REFERENCES "committer" ("id");
 
 ALTER TABLE "operator_slasher_commitments" ADD FOREIGN KEY ("writer_id") REFERENCES "writers" ("id");
 
