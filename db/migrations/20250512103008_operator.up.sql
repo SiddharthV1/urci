@@ -6,12 +6,14 @@ CREATE TABLE "operators" (
   "address" CHAR(42),
   "num_keys" int,
   "registration_processed" bool,
+  "event_id" uuid,
   "created_at" timestamp DEFAULT (now()),
   "updated_at" timestamp DEFAULT (now()),
   "writer_id" uuid
 );
 
 
+ALTER TABLE "operators" ADD FOREIGN KEY ("event_id") REFERENCES "events" ("id");
 ALTER TABLE "operators" ADD FOREIGN KEY ("writer_id") REFERENCES "writers" ("id");
 
 SELECT trigger_audit_log('operators');
@@ -21,10 +23,13 @@ CREATE TABLE "operator_collateral" (
   "id" uuid PRIMARY KEY DEFAULT (gen_random_uuid()),
   "operator_id" uuid,
   "collateral_wei" int,
+  "event_id" uuid,
   "created_at" timestamp DEFAULT (now()),
   "updated_at" timestamp DEFAULT (now()),
   "writer_id" uuid
 );
+
+ALTER TABLE "operator_collateral" ADD FOREIGN KEY ("event_id") REFERENCES "events" ("id");
 
 ALTER TABLE "operator_collateral" ADD FOREIGN KEY ("operator_id") REFERENCES "operators" ("id");
 
@@ -40,11 +45,14 @@ CREATE TABLE "operator_record" (
   "slashed_at" int,
   "deleted" bool,
   "equivocated" bool,
+  "event_id" uuid,
   "created_at" timestamp DEFAULT (now()),
   "updated_at" timestamp DEFAULT (now()),
   "writer_id" uuid
 );
 
+
+ALTER TABLE "operator_record" ADD FOREIGN KEY ("event_id") REFERENCES "events" ("id");
 
 ALTER TABLE "operator_record" ADD FOREIGN KEY ("operator_id") REFERENCES "operators" ("id");
 
