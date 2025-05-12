@@ -13,6 +13,7 @@ CREATE TYPE "verification_status" AS ENUM (
 CREATE TABLE "verifications" (
   "id" uuid PRIMARY KEY DEFAULT (gen_random_uuid()),
   "registration_id" uuid,
+  "signature_id" uuid,
   "verification_status" verification_status,
   "created_at" timestamp DEFAULT (now()),
   "updated_at" timestamp DEFAULT (now()),
@@ -23,6 +24,8 @@ CREATE TABLE "verifications" (
 ALTER TABLE "verifications" ADD FOREIGN KEY ("registration_id") REFERENCES "events" ("id");
 
 ALTER TABLE "verifications" ADD FOREIGN KEY ("writer_id") REFERENCES "writers" ("id");
+
+ALTER TABLE "verifications" ADD FOREIGN KEY ("signature_id") REFERENCES "keys_and_signatures" ("id");
 
 SELECT trigger_audit_log('verifications');
 SELECT trigger_updated_at('verifications');

@@ -1,7 +1,7 @@
-DROP TRIGGER IF EXISTS audit_log_trigger ON verification;
-DROP TRIGGER IF EXISTS set_updated_at ON verification;
+DROP TRIGGER IF EXISTS audit_log_trigger ON verifications;
+DROP TRIGGER IF EXISTS set_updated_at ON verifications;
 
-DROP TABLE IF EXISTS verification;
+DROP TABLE IF EXISTS verifications;
 
 
 DO $$
