@@ -14,7 +14,7 @@ ALTER TABLE "slasher" ADD FOREIGN KEY ("writer_id") REFERENCES "writers" ("id");
 select trigger_audit_log('slasher');
 select trigger_updated_at('slasher');
 
-CREATE TABLE "commiter" (
+CREATE TABLE "committer" (
   "id" uuid PRIMARY KEY DEFAULT (gen_random_uuid()),
   "address" CHAR(42),
   "event_id" uuid,
@@ -24,9 +24,9 @@ CREATE TABLE "commiter" (
 );
 
 
-ALTER TABLE "commiter" ADD FOREIGN KEY ("event_id") REFERENCES "events" ("id");
+ALTER TABLE "committer" ADD FOREIGN KEY ("event_id") REFERENCES "events" ("id");
 
-ALTER TABLE "commiter" ADD FOREIGN KEY ("writer_id") REFERENCES "writers" ("id");
+ALTER TABLE "committer" ADD FOREIGN KEY ("writer_id") REFERENCES "writers" ("id");
 
-select trigger_audit_log('commiter');
-select trigger_updated_at('commiter');
+select trigger_audit_log('committer');
+select trigger_updated_at('committer');
