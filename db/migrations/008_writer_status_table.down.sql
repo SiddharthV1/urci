@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS writer_status CASCADE;

@@ -1,0 +1,2 @@
+DROP FUNCTION IF EXISTS trigger_audit_log(REGCLASS) CASCADE;
+DROP FUNCTION IF EXISTS audit_log_trigger() CASCADE;
