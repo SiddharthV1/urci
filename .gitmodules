@@ -1,0 +1,3 @@
+[submodule "contracts/urc"]
+	path = contracts/urc
+	url = https://github.com/eth-fabric/urc.git
