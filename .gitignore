@@ -1,0 +1,6 @@
+target/
+
+# Forge build artifacts
+**/**/**/contracts/out/
+**/**/**/contracts/cache/
+**/contracts/cache/

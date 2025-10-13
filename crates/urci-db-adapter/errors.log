@@ -1,0 +1,390 @@
+warning: unused import: `warn`
+ --> crates/urci-db-adapter/src/postgres/db.rs:5:21
+  |
+5 | use tracing::{info, warn};
+  |                     ^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused imports: `OperatorCommitmentResponse`, `OperatorTimelineEvent`, and `SlashEventResponse`
+   --> crates/urci-db-adapter/src/postgres/reader.rs:187:32
+    |
+187 |         use urci_common::api::{OperatorCommitmentResponse, SlashEventResponse, OperatorTimelineEvent};
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `EventResponse`
+    --> crates/urci-db-adapter/src/postgres/reader.rs:1192:47
+     |
+1192 |         use urci_common::api::{BlockResponse, EventResponse};
+     |                                               ^^^^^^^^^^^^^
+
+warning: unused import: `UrciBatchedBlockRangeUpdate`
+   --> crates/urci-db-adapter/src/postgres/writer/tests.rs:767:44
+    |
+767 |         use urci_common::{UrciBlockUpdate, UrciBatchedBlockRangeUpdate};
+    |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `chain_id`
+    --> crates/urci-db-adapter/src/postgres/reader.rs:1189:9
+     |
+1189 |         chain_id: i64,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_chain_id`
+     |
+     = note: `#[warn(unused_variables)]` on by default
+
+warning: unused import: `crate::traits::AdapterWriter`
+   --> crates/urci-db-adapter/src/postgres/test_helpers.rs:228:13
+    |
+228 |         use crate::traits::AdapterWriter;
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `DatabaseError`
+  --> crates/urci-db-adapter/src/postgres/writer/error_handling.rs:13:23
+   |
+13 |     use sqlx::error::{DatabaseError, ErrorKind};
+   |                       ^^^^^^^^^^^^^
+
+warning: unused variable: `chain_id`
+  --> crates/urci-db-adapter/src/postgres/adapter.rs:20:16
+   |
+20 |     pub fn new(chain_id: i64) -> Self {
+   |                ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_chain_id`
+
+warning: unused variable: `writer_id`
+   --> crates/urci-db-adapter/src/postgres/db.rs:229:13
+    |
+229 |         let writer_id = self.create_session(registry_address, Some(start_block)).await?;
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer_id`
+
+warning: unused variable: `slasher_address`
+    --> crates/urci-db-adapter/src/postgres/reader.rs:1066:21
+     |
+1066 |                 let slasher_address: Option<Vec<u8>> = row.get("slasher_address");
+     |                     ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_slasher_address`
+
+warning: method `run_migrations` is never used
+  --> crates/urci-db-adapter/src/postgres/db.rs:16:14
+   |
+15 | impl PostgresAdapter {
+   | -------------------- method in this implementation
+16 |     async fn run_migrations(&self) -> Result<()> {
+   |              ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: method `get_operator_timeline` is never used
+    --> crates/urci-db-adapter/src/postgres/reader.rs:1420:14
+     |
+1184 | impl PostgresAdapter {
+     | -------------------- method in this implementation
+...
+1420 |     async fn get_operator_timeline(
+     |              ^^^^^^^^^^^^^^^^^^^^^
+
+warning: static `TEST_LOG_INDEX` is never used
+  --> crates/urci-db-adapter/src/postgres/writer/tests.rs:14:16
+   |
+14 |     static mut TEST_LOG_INDEX: i32 = 0;
+   |                ^^^^^^^^^^^^^^
+
+warning: `urci-db-adapter` (lib test) generated 13 warnings (run `cargo fix --lib -p urci-db-adapter --tests` to apply 4 suggestions)
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.45s
+     Running unittests src/lib.rs (/home/sid/dev/ethereum/urc-indexer/urci-db/target/debug/deps/urci_db_adapter-7a7a2c9f059c0096)
+
+running 22 tests
+test postgres::writer::tests::tests::test_block_active_event_id_reflects_last_event ... FAILED
+test postgres::writer::tests::tests::test_fork_view_tracks_active_event_id ... FAILED
+test postgres::reader::tests::test_get_block_finalized ... FAILED
+test postgres::writer::tests::tests::test_gap_healing_between_backfill_and_stream ... FAILED
+test postgres::reader::tests::test_get_block_with_events_by_hash ... FAILED
+test postgres::reader::tests::test_get_block_with_events ... FAILED
+test postgres::reader::tests::test_get_block_head ... FAILED
+test postgres::writer::tests::tests::test_finalizer_deletes_empty_finalized_blocks ... FAILED
+test postgres::writer::tests::tests::test_gap_healing_discovers_block_0_last ... FAILED
+test postgres::writer::tests::tests::test_last_finalized_block_view_by_chain ... FAILED
+test postgres::writer::tests::tests::test_orphaned_block_linking_by_gap_healing ... FAILED
+test postgres::writer::tests::tests::test_reject_blocks_below_start_height ... FAILED
+test postgres::writer::tests::tests::test_root_block_constraints ... FAILED
+test postgres::writer::tests::tests::test_sequential_blocks_parent_work_id_chaining ... FAILED
+test postgres::writer::tests::tests::test_write_collateral_added_event ... FAILED
+test postgres::writer::tests::tests::test_write_collateral_claimed_event ... FAILED
+test postgres::writer::tests::tests::test_write_opt_in_event ... FAILED
+test postgres::writer::tests::tests::test_write_opt_out_event ... FAILED
+test postgres::writer::tests::tests::test_write_registration_event ... FAILED
+test postgres::writer::tests::tests::test_write_slashing_event ... FAILED
+test postgres::writer::tests::tests::test_write_unregistration_event ... FAILED
+test postgres::writer::tests::tests::test_writer_status_tracks_last_indexed_event ... FAILED
+
+failures:
+
+---- postgres::writer::tests::tests::test_block_active_event_id_reflects_last_event stdout ----
+
+thread 'postgres::writer::tests::tests::test_block_active_event_id_reflects_last_event' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:434:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- postgres::writer::tests::tests::test_fork_view_tracks_active_event_id stdout ----
+
+thread 'postgres::writer::tests::tests::test_fork_view_tracks_active_event_id' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:319:56:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::reader::tests::test_get_block_finalized stdout ----
+
+thread 'postgres::reader::tests::test_get_block_finalized' panicked at crates/urci-db-adapter/src/postgres/reader.rs:1614:14:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_gap_healing_between_backfill_and_stream stdout ----
+
+thread 'postgres::writer::tests::tests::test_gap_healing_between_backfill_and_stream' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:943:14:
+Failed to initialize at block 100: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::reader::tests::test_get_block_with_events_by_hash stdout ----
+
+thread 'postgres::reader::tests::test_get_block_with_events_by_hash' panicked at crates/urci-db-adapter/src/postgres/reader.rs:1533:14:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::reader::tests::test_get_block_with_events stdout ----
+
+thread 'postgres::reader::tests::test_get_block_with_events' panicked at crates/urci-db-adapter/src/postgres/reader.rs:1490:14:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::reader::tests::test_get_block_head stdout ----
+
+thread 'postgres::reader::tests::test_get_block_head' panicked at crates/urci-db-adapter/src/postgres/reader.rs:1568:14:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_finalizer_deletes_empty_finalized_blocks stdout ----
+
+thread 'postgres::writer::tests::tests::test_finalizer_deletes_empty_finalized_blocks' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:219:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_gap_healing_discovers_block_0_last stdout ----
+
+thread 'postgres::writer::tests::tests::test_gap_healing_discovers_block_0_last' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:776:55:
+Failed to initialize at block 1: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_last_finalized_block_view_by_chain stdout ----
+
+thread 'postgres::writer::tests::tests::test_last_finalized_block_view_by_chain' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:162:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_orphaned_block_linking_by_gap_healing stdout ----
+
+thread 'postgres::writer::tests::tests::test_orphaned_block_linking_by_gap_healing' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:1177:14:
+Failed to initialize at block 10: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_reject_blocks_below_start_height stdout ----
+
+thread 'postgres::writer::tests::tests::test_reject_blocks_below_start_height' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:902:14:
+Failed to initialize at block 100: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_root_block_constraints stdout ----
+
+thread 'postgres::writer::tests::tests::test_root_block_constraints' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:1069:14:
+Failed to initialize at block 50: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_sequential_blocks_parent_work_id_chaining stdout ----
+
+thread 'postgres::writer::tests::tests::test_sequential_blocks_parent_work_id_chaining' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:711:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_write_collateral_added_event stdout ----
+
+thread 'postgres::writer::tests::tests::test_write_collateral_added_event' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:523:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_write_collateral_claimed_event stdout ----
+
+thread 'postgres::writer::tests::tests::test_write_collateral_claimed_event' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:609:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_write_opt_in_event stdout ----
+
+thread 'postgres::writer::tests::tests::test_write_opt_in_event' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:486:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_write_opt_out_event stdout ----
+
+thread 'postgres::writer::tests::tests::test_write_opt_out_event' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:560:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_write_registration_event stdout ----
+
+thread 'postgres::writer::tests::tests::test_write_registration_event' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:27:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_write_slashing_event stdout ----
+
+thread 'postgres::writer::tests::tests::test_write_slashing_event' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:658:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_write_unregistration_event stdout ----
+
+thread 'postgres::writer::tests::tests::test_write_unregistration_event' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:58:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+---- postgres::writer::tests::tests::test_writer_status_tracks_last_indexed_event stdout ----
+
+thread 'postgres::writer::tests::tests::test_writer_status_tracks_last_indexed_event' panicked at crates/urci-db-adapter/src/postgres/writer/tests.rs:89:55:
+Failed to initialize: error returned from database: relation "chain" does not exist
+
+Caused by:
+    relation "chain" does not exist
+
+Location:
+    crates/urci-db-adapter/src/postgres/db.rs:59:9
+
+
+failures:
+    postgres::reader::tests::test_get_block_finalized
+    postgres::reader::tests::test_get_block_head
+    postgres::reader::tests::test_get_block_with_events
+    postgres::reader::tests::test_get_block_with_events_by_hash
+    postgres::writer::tests::tests::test_block_active_event_id_reflects_last_event
+    postgres::writer::tests::tests::test_finalizer_deletes_empty_finalized_blocks
+    postgres::writer::tests::tests::test_fork_view_tracks_active_event_id
+    postgres::writer::tests::tests::test_gap_healing_between_backfill_and_stream
+    postgres::writer::tests::tests::test_gap_healing_discovers_block_0_last
+    postgres::writer::tests::tests::test_last_finalized_block_view_by_chain
+    postgres::writer::tests::tests::test_orphaned_block_linking_by_gap_healing
+    postgres::writer::tests::tests::test_reject_blocks_below_start_height
+    postgres::writer::tests::tests::test_root_block_constraints
+    postgres::writer::tests::tests::test_sequential_blocks_parent_work_id_chaining
+    postgres::writer::tests::tests::test_write_collateral_added_event
+    postgres::writer::tests::tests::test_write_collateral_claimed_event
+    postgres::writer::tests::tests::test_write_opt_in_event
+    postgres::writer::tests::tests::test_write_opt_out_event
+    postgres::writer::tests::tests::test_write_registration_event
+    postgres::writer::tests::tests::test_write_slashing_event
+    postgres::writer::tests::tests::test_write_unregistration_event
+    postgres::writer::tests::tests::test_writer_status_tracks_last_indexed_event
+
+test result: FAILED. 0 passed; 22 failed; 0 ignored; 0 measured; 0 filtered out; finished in 111.10s
+
+error: test failed, to rerun pass `--lib`

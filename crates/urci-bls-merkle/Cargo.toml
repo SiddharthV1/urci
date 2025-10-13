@@ -1,0 +1,61 @@
+[package]
+name = "urci-bls-merkle"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Alloy dependencies for Ethereum types
+alloy-primitives = { workspace = true, features = ["serde"] }
+alloy-sol-types = { workspace = true }
+alloy-genesis = { workspace = true }
+alloy-consensus = { workspace = true }
+
+# URCI dependencies
+urci-common = { path = "../urci-common" }
+
+# Reth dependencies for EVM execution
+reth-chainspec = { workspace = true }
+reth-db-common = { workspace = true }
+reth-evm = { workspace = true }
+reth-evm-ethereum = { workspace = true }
+reth-primitives = { workspace = true }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-revm = { workspace = true }
+reth-testing-utils = { workspace = true }
+
+# REVM for EVM execution
+revm = { workspace = true, default-features = false, features = ["std", "tracer"] }
+revm-inspector = { workspace = true }
+revm-inspectors = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+
+# Crypto
+secp256k1 = { workspace = true, features = ["rand", "global-context", "recovery"] }
+
+# Utilities
+async-trait = { workspace = true }
+eyre = { workspace = true }
+hex = { workspace = true }
+sha3 = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "macros"] }
+dashmap = { workspace = true }
+
+# Foundry for compiling contracts
+foundry-compilers = { workspace = true }
+foundry-config = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[build-dependencies]
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# For testing with actual EVM
+#urc-test-utils = { path = "../urc-test-utils" }
