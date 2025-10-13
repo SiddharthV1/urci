@@ -1,0 +1,40 @@
+[package]
+name = "urci-db-adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Database adapter for URC indexer with multi-writer support"
+
+[dependencies]
+# Core
+alloy-primitives = { workspace = true }
+alloy-sol-types = { workspace = true }
+
+# Database
+sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres", "uuid", "bigdecimal"] }
+
+# Async
+async-trait = { workspace = true }
+tokio = { workspace = true }
+
+# Utils
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+tracing = { workspace = true }
+eyre = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+sha2 = { workspace = true }
+hex = { workspace = true }
+
+# URC crates
+urci-common = { path = "../urci-common" }
+
+# Test utilities (public for use in other crates' tests)
+testcontainers = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }

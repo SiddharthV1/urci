@@ -1,0 +1,83 @@
+   Compiling urci-db-adapter v0.1.0 (/home/sid/dev/ethereum/urc-indexer/urci-db/crates/urci-db-adapter)
+error: error canonicalizing migration directory /home/sid/dev/ethereum/urc-indexer/urci-db/crates/urci-db-adapter/../../../migrations: No such file or directory (os error 2)
+  --> crates/urci-db-adapter/src/postgres/db.rs:20:9
+   |
+20 |         sqlx::migrate!("../../../migrations")
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::migrate` which comes from the expansion of the macro `sqlx::migrate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error canonicalizing migration directory /home/sid/dev/ethereum/urc-indexer/urci-db/crates/urci-db-adapter/../../../migrations: No such file or directory (os error 2)
+  --> crates/urci-db-adapter/src/postgres/db.rs:51:9
+   |
+51 |         sqlx::migrate!("../../../migrations")
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::migrate` which comes from the expansion of the macro `sqlx::migrate` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `warn`
+ --> crates/urci-db-adapter/src/postgres/db.rs:5:21
+  |
+5 | use tracing::{info, warn};
+  |                     ^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unused imports: `OperatorCommitmentResponse`, `OperatorTimelineEvent`, and `SlashEventResponse`
+   --> crates/urci-db-adapter/src/postgres/reader.rs:187:32
+    |
+187 |         use urci_common::api::{OperatorCommitmentResponse, SlashEventResponse, OperatorTimelineEvent};
+    |                                ^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `EventResponse`
+    --> crates/urci-db-adapter/src/postgres/reader.rs:1192:47
+     |
+1192 |         use urci_common::api::{BlockResponse, EventResponse};
+     |                                               ^^^^^^^^^^^^^
+
+warning: unused import: `UrciBatchedBlockRangeUpdate`
+   --> crates/urci-db-adapter/src/postgres/writer/tests.rs:767:44
+    |
+767 |         use urci_common::{UrciBlockUpdate, UrciBatchedBlockRangeUpdate};
+    |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `chain_id`
+    --> crates/urci-db-adapter/src/postgres/reader.rs:1189:9
+     |
+1189 |         chain_id: i64,
+     |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_chain_id`
+     |
+     = note: `#[warn(unused_variables)]` on by default
+
+warning: unused import: `crate::traits::AdapterWriter`
+   --> crates/urci-db-adapter/src/postgres/test_helpers.rs:228:13
+    |
+228 |         use crate::traits::AdapterWriter;
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `DatabaseError`
+  --> crates/urci-db-adapter/src/postgres/writer/error_handling.rs:13:23
+   |
+13 |     use sqlx::error::{DatabaseError, ErrorKind};
+   |                       ^^^^^^^^^^^^^
+
+warning: unused variable: `chain_id`
+  --> crates/urci-db-adapter/src/postgres/adapter.rs:20:16
+   |
+20 |     pub fn new(chain_id: i64) -> Self {
+   |                ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_chain_id`
+
+warning: unused variable: `writer_id`
+   --> crates/urci-db-adapter/src/postgres/db.rs:229:13
+    |
+229 |         let writer_id = self.create_session(registry_address, Some(start_block)).await?;
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_writer_id`
+
+warning: unused variable: `slasher_address`
+    --> crates/urci-db-adapter/src/postgres/reader.rs:1066:21
+     |
+1066 |                 let slasher_address: Option<Vec<u8>> = row.get("slasher_address");
+     |                     ^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_slasher_address`
+
+warning: `urci-db-adapter` (lib test) generated 10 warnings
+error: could not compile `urci-db-adapter` (lib test) due to 2 previous errors; 10 warnings emitted

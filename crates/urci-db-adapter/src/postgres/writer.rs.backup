@@ -1,0 +1,1708 @@
+use alloy_primitives::{hex, BlockHash, TxHash, U256, B256};
+use async_trait::async_trait;
+use eyre::{eyre, Result};
+use sqlx::Transaction;
+use uuid::Uuid;
+
+use crate::sql_constants;
+use crate::traits::AdapterWriter;
+use urc_common::events::UrciBlockUpdate;
+
+use super::adapter::PostgresAdapter;
+
+// Helper methods for writing events (not part of trait)
+impl PostgresAdapter {
+    pub(crate) async fn write_tx_events(
+        &mut self,
+        event: urc_common::events::UrcTxEvent,
+        block_hash: BlockHash,
+        block_number: i64,
+        sqlx_tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        // Ensure sender address exists
+        sqlx::query(sql_constants::INSERT_ADDRESS)
+            .bind(event.tx_sender_address.as_slice())
+            .bind(self.chain_id)
+            .bind(Option::<bool>::None) // Need to check bytecode to determine if contract
+            .execute(sqlx_tx.as_mut())
+            .await?;
+
+        // Insert transaction
+        // Use sqlx::types::BigDecimal for NUMERIC columns
+        use sqlx::types::BigDecimal;
+        use std::str::FromStr;
+
+        sqlx::query(sql_constants::INSERT_TRANSACTION_IGNORE)
+            .bind(self.chain_id)
+            .bind(event.transaction_hash.as_slice())
+            .bind(block_hash.as_slice())
+            .bind(event.tx_sender_address.as_slice())
+            .bind(None::<Vec<u8>>) // to_address - TODO: extract from tx
+            .bind(BigDecimal::from_str(&event.tx_value.to_string()).unwrap_or_default())
+            .bind(0i64) // gas - TODO: extract from tx
+            .bind(BigDecimal::from_str("0").unwrap()) // gas_price - TODO: extract from tx
+            .bind(0i64) // nonce - TODO: extract from tx
+            .bind(event.transaction_input.map(|b| b.to_vec()))
+            .bind(event.transaction_index as i32)
+            .execute(sqlx_tx.as_mut())
+            .await?;
+
+        // Process each URC event
+        for (log_index, urc_event) in event.urc_events.into_iter().enumerate() {
+            self.write_event(
+                urc_event,
+                event.transaction_hash,
+                block_hash,
+                block_number,
+                event.transaction_index as i32,
+                log_index as i32,
+                sqlx_tx,
+            )
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn write_event(
+        &mut self,
+        event: urc_common::events::UrcEvent,
+        tx_hash: TxHash,
+        block_hash: BlockHash,
+        block_number: i64,
+        tx_index: i32,
+        log_index: i32,
+        sqlx_tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        use urc_common::events::UrcEventKind;
+
+        // First, insert into events table to get event_id
+        let event_type = match &event.event {
+            UrcEventKind::Registration(_, _, _) => "OperatorRegistered",
+            UrcEventKind::Unregistration(_) => "OperatorUnregistered",
+            UrcEventKind::OptIn(_) => "OperatorOptedIn",
+            UrcEventKind::OptOut(_) => "OperatorOptedOut",
+            UrcEventKind::CollateralClamed(_) => "CollateralClaimed",
+            UrcEventKind::CollateralAdded(_) => "CollateralAdded",
+            UrcEventKind::Slashing(_, _, _) => "OperatorSlashed",
+        };
+
+        let event_id: i64 = sqlx::query_scalar(sql_constants::INSERT_EVENT_RETURNING_ID)
+            .bind(self.chain_id)
+            .bind(block_number)
+            .bind(block_hash.as_slice())
+            .bind(tx_hash.as_slice())
+            .bind(tx_index)
+            .bind(log_index)
+            .bind(event_type)
+            .bind(serde_json::to_value(&event)?)
+            .bind(self.writer_id)
+            .fetch_one(sqlx_tx.as_mut())
+            .await?;
+
+        // Now process the specific event with the event_id
+        match event.event {
+            UrcEventKind::Registration(owner, reg_event, validation) => {
+                // TODO Handle errors
+                self.write_registration_event(
+                    owner,
+                    reg_event,
+                    validation.unwrap(),
+                    event_id,
+                    sqlx_tx,
+                )
+                .await
+            },
+            UrcEventKind::Unregistration(unreg_event) => {
+                self.write_unregistration_event(unreg_event, event_id, sqlx_tx).await
+            },
+            UrcEventKind::OptIn(opt_in_event) => {
+                self.write_opt_in_event(opt_in_event, event_id, sqlx_tx).await
+            },
+            UrcEventKind::OptOut(opt_out_event) => {
+                self.write_opt_out_event(opt_out_event, event_id, sqlx_tx).await
+            },
+            UrcEventKind::CollateralClamed(claim_event) => {
+                self.write_collateral_claimed_event(claim_event, event_id, sqlx_tx).await
+            },
+            UrcEventKind::CollateralAdded(add_event) => {
+                self.write_collateral_added_event(add_event, event_id, sqlx_tx).await
+            },
+            UrcEventKind::Slashing(slash_event, amount, call) => {
+                self.write_slashing_event(slash_event, amount, call, event_id, sqlx_tx).await
+            },
+        }
+    }
+}
+
+#[async_trait]
+impl AdapterWriter for PostgresAdapter {
+    async fn write_tx_event(
+        &mut self,
+        _event: urc_common::events::UrcTxEvent,
+        _tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        // This trait method doesn't provide block_hash and block_number which we need
+        // The trait needs to be updated to include block context
+        Err(eyre!(
+            "write_tx_event requires block context - use write_block instead which provides proper context"
+        ))
+    }
+
+    async fn write_event(
+        &mut self,
+        _event: urc_common::events::UrcEvent,
+        _tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        // This method requires block context that the trait doesn't provide
+        // This should be called through write_block which has the proper context
+        Err(eyre!("write_event requires block context - use write_block instead"))
+    }
+
+    async fn write_block(&mut self, block: UrciBlockUpdate) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
+        // For root blocks (block number 1 with no parent), leave parent_work_id as NULL
+        // The database constraint requires root blocks to have NULL parent_work_id
+        let parent_work_id = block.parent_work_id.map(|w| w.to_vec());
+
+        // Insert block FIRST (without active_event_id) so transactions can reference it
+        sqlx::query(sql_constants::INSERT_BLOCK_UPSERT)
+            .bind(self.chain_id)
+            .bind(block.block_number as i64)
+            .bind(block.block_hash.as_slice())
+            .bind(block.parent_block_hash.as_slice())
+            .bind(parent_work_id)
+            .bind(!block.reorged)
+            .bind(false)
+            .bind(0i64) // TODO: get actual timestamp
+            .bind(None::<i64>) // active_event_id - will update later
+            .execute(tx.as_mut())
+            .await?;
+
+        // Now process transactions and events
+        for tx_events in block.events {
+            self.write_tx_events(tx_events, block.block_hash, block.block_number as i64, &mut tx)
+                .await?;
+        }
+
+        // Get the last event_id for this block to set as active_event_id
+        let last_event_id = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(id) FROM events WHERE block_hash = $1 AND chain_id = $2"
+        )
+        .bind(block.block_hash.as_slice())
+        .bind(self.chain_id)
+        .fetch_one(tx.as_mut())
+        .await?;
+
+        // Update block with active_event_id if we have events
+        if let Some(event_id) = last_event_id {
+            sqlx::query(
+                "UPDATE blocks SET active_event_id = $1 WHERE chain_id = $2 AND hash = $3"
+            )
+            .bind(event_id)
+            .bind(self.chain_id)
+            .bind(block.block_hash.as_slice())
+            .execute(tx.as_mut())
+            .await?;
+
+            // Update writer_status with last_indexed_event_id
+            if let (Some(writer_id), Some(session_id)) = (self.writer_id, self.session_id.as_ref()) {
+                sqlx::query(sql_constants::INSERT_WRITER_STATUS_UPSERT)
+                    .bind(writer_id)
+                    .bind(session_id)
+                    .bind(self.chain_id)
+                    .bind(block.block_number as i64)  // seen_block_from
+                    .bind(block.block_number as i64)  // seen_block_to
+                    .bind(block.block_number as i64)  // chain_tip
+                    .bind(event_id)                   // last_indexed_event_id
+                    .execute(tx.as_mut())
+                    .await?;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn handle_reorg(&mut self, from_block: u64) -> Result<()> {
+        sqlx::query(sql_constants::UPDATE_BLOCKS_CANONICAL_FALSE)
+            .bind(from_block as i64)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn finalize_blocks(&mut self, up_to_block: u64) -> Result<()> {
+        sqlx::query(sql_constants::UPDATE_BLOCKS_FINALIZED_TRUE)
+            .bind(up_to_block as i64)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn update_sync_status(
+        &mut self,
+        from_block: u64,
+        to_block: u64,
+        _syncing: bool,
+    ) -> Result<()> {
+        if let (Some(writer_id), Some(session_id)) = (self.writer_id, self.session_id.as_ref()) {
+            // Get the current chain tip
+            let chain_tip: Option<i64> =
+                sqlx::query_scalar(sql_constants::SELECT_MAX_CANONICAL_BLOCK)
+                    .fetch_optional(&self.pool)
+                    .await?;
+
+            sqlx::query(sql_constants::INSERT_WRITER_STATUS_UPSERT)
+                .bind(writer_id)
+                .bind(session_id)
+                .bind(self.chain_id)
+                .bind(from_block as i64)
+                .bind(to_block as i64)
+                .bind(chain_tip.unwrap_or(to_block as i64))
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn get_lock(&mut self) -> Result<()> {
+        let acquired: bool = sqlx::query_scalar(sql_constants::TRY_ADVISORY_LOCK)
+            .fetch_one(&self.pool)
+            .await?;
+
+        if !acquired {
+            return Err(eyre!("Failed to acquire advisory lock"));
+        }
+        Ok(())
+    }
+
+    async fn release_lock(&mut self) -> Result<()> {
+        sqlx::query(sql_constants::ADVISORY_UNLOCK).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    async fn write_registration_event(
+        &mut self,
+        owner: urc_common::events::Owner,
+        event: urc_common::OperatorRegistered,
+        validation: urc_common::events::RegistrationValidationResult,
+        event_id: i64,
+        tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        // Ensure owner address exists
+        sqlx::query(sql_constants::INSERT_ADDRESS)
+            .bind(owner.as_slice())
+            .bind(self.chain_id)
+            .bind(false) // Default to false, can check bytecode later if needed
+            .execute(tx.as_mut())
+            .await?;
+
+        let mut sig_id: Option<Uuid> = None;
+        let mut pubkey_id: Option<Uuid> = None;
+        let mut proof_id: Option<Uuid> = None;
+
+        // Insert BLS signatures and pubkeys for each validation
+        for sig_validation in &validation.signature {
+            // Insert BLS signature G2 point
+            sig_id = Some(
+                sqlx::query_scalar(sql_constants::INSERT_BLS_SIGNATURE_G2_RETURNING_ID)
+                    .bind(serde_json::to_value(&sig_validation.signature_data)?)
+                    .bind(sig_validation.signature_data.x_c0_a.as_slice())
+                    .bind(sig_validation.signature_data.x_c0_b.as_slice())
+                    .bind(sig_validation.signature_data.y_c0_a.as_slice())
+                    .bind(sig_validation.signature_data.y_c0_b.as_slice())
+                    .bind(sig_validation.signature_data.x_c1_a.as_slice())
+                    .bind(sig_validation.signature_data.x_c1_b.as_slice())
+                    .bind(sig_validation.signature_data.y_c1_a.as_slice())
+                    .bind(sig_validation.signature_data.y_c1_b.as_slice())
+                    .bind(self.writer_id)
+                    .fetch_one(tx.as_mut())
+                    .await?,
+            );
+
+            // Insert BLS pubkey G1 point
+            pubkey_id = Some(
+                sqlx::query_scalar(sql_constants::INSERT_BLS_PUBKEY_G1_RETURNING_ID)
+                    .bind(serde_json::to_value(&sig_validation.pubkey_data)?)
+                    .bind(sig_validation.pubkey_data.x_a.as_slice())
+                    .bind(sig_validation.pubkey_data.x_b.as_slice())
+                    .bind(sig_validation.pubkey_data.y_a.as_slice())
+                    .bind(sig_validation.pubkey_data.y_b.as_slice())
+                    .bind(self.writer_id)
+                    .fetch_one(tx.as_mut())
+                    .await?,
+            );
+        }
+
+        // Insert Merkle Tree Record
+        let leaves_json = serde_json::to_value(
+            validation
+                .tree
+                .leaves
+                .iter()
+                .map(|leaf| format!("0x{}", hex::encode(leaf)))
+                .collect::<Vec<_>>(),
+        )?;
+
+        sqlx::query(sql_constants::INSERT_MERKLE_TREE)
+            .bind(event.registrationRoot.as_slice())
+            .bind(leaves_json)
+            .bind(validation.tree.leaves.len() as i32)
+            .execute(tx.as_mut())
+            .await?;
+
+        // Insert Merkle Inclusion Proof Records
+        for (idx, sig_validation) in validation.signature.iter().enumerate() {
+            proof_id = Some(
+                sqlx::query_scalar(sql_constants::INSERT_MERKLE_PROOF_RETURNING_ID)
+                    .bind(idx as i32)
+                    .bind(
+                        sig_validation
+                            .merkle_proof
+                            .iter()
+                            .map(|h| h.as_slice())
+                            .collect::<Vec<_>>(),
+                    )
+                    .bind(event.registrationRoot.as_slice())
+                    .bind(self.writer_id)
+                    .fetch_one(tx.as_mut())
+                    .await?,
+            );
+        }
+
+        // Insert Signed Registration Record
+        if let (Some(sig_id), Some(pubkey_id), Some(proof_id)) = (sig_id, pubkey_id, proof_id) {
+            sqlx::query(sql_constants::INSERT_SIGNED_REGISTRATION)
+                .bind(owner.as_slice())
+                .bind(sig_id)
+                .bind(pubkey_id)
+                .bind(event.registrationRoot.as_slice())
+                .bind(proof_id)
+                .bind(if validation.has_fraudulent {
+                    "failed_signature_verification"
+                } else {
+                    "verified"
+                })
+                .bind(self.writer_id)
+                .execute(tx.as_mut())
+                .await?;
+        }
+
+        // Insert Operator Record via root and chain_id
+        sqlx::query(sql_constants::INSERT_OPERATOR_IGNORE)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(owner.as_slice())
+            .bind(validation.number_of_keys() as i32)
+            .bind(!validation.has_fraudulent)
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        // Insert Operator Data Record
+        sqlx::query(sql_constants::INSERT_OPERATOR_DATA_REGISTERED)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(serde_json::to_value(&event)?)
+            .bind(event_id) // registered_at is event_id reference
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        // Insert Operator Collateral Record if initial collateral provided
+        if event.collateralWei > U256::ZERO {
+            sqlx::query(sql_constants::INSERT_OPERATOR_COLLATERAL_FULL)
+                .bind(event.registrationRoot.as_slice())
+                .bind(self.chain_id)
+                .bind(event.collateralWei.to_string())
+                .bind(event_id)
+                .bind(self.writer_id)
+                .execute(tx.as_mut())
+                .await?;
+        }
+
+        // Note: writer_status is updated by write_block() which calls this function
+        // No need to update it here as write_block() has the full block context
+        Ok(())
+    }
+
+    async fn write_unregistration_event(
+        &mut self,
+        event: urc_common::OperatorUnregistered,
+        event_id: i64,
+        tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        // Update operator record to mark as unregistered
+        sqlx::query(sql_constants::UPDATE_OPERATOR_UNREGISTER)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        // Insert operator_data record for unregistration event
+        sqlx::query(sql_constants::INSERT_OPERATOR_DATA_UNREGISTERED)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(serde_json::to_value(&event)?)
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        Ok(())
+    }
+
+    async fn write_opt_in_event(
+        &mut self,
+        event: urc_common::OperatorOptedIn,
+        event_id: i64,
+        tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        // Ensure slasher and committer addresses exist
+        sqlx::query(sql_constants::INSERT_ADDRESS)
+            .bind(event.slasher.as_slice())
+            .bind(self.chain_id)
+            .bind(Some(true)) // Slasher is a contract
+            .execute(tx.as_mut())
+            .await?;
+
+        sqlx::query(sql_constants::INSERT_ADDRESS)
+            .bind(event.committer.as_slice())
+            .bind(self.chain_id)
+            .bind(Some(true)) // Committer is a contract
+            .execute(tx.as_mut())
+            .await?;
+
+        // Insert slasher record
+        let slasher_id: Uuid = sqlx::query_scalar(sql_constants::INSERT_SLASHER_RETURNING_ID)
+            .bind(self.chain_id)
+            .bind(event.slasher.as_slice())
+            .bind(event_id)
+            .bind(self.writer_id)
+            .fetch_one(tx.as_mut())
+            .await?;
+
+        // Insert committer record
+        let committer_id: Uuid = sqlx::query_scalar(sql_constants::INSERT_COMMITTER_RETURNING_ID)
+            .bind(self.chain_id)
+            .bind(event.committer.as_slice())
+            .bind(event_id)
+            .bind(self.writer_id)
+            .fetch_one(tx.as_mut())
+            .await?;
+
+        // Always INSERT for history (not UPSERT)
+        sqlx::query(sql_constants::INSERT_OPERATOR_SLASHER_COMMITMENT_OPTIN)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(slasher_id)
+            .bind(committer_id)
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        // Insert operator_data record for audit
+        sqlx::query(sql_constants::INSERT_OPERATOR_DATA_OPTED_IN)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(serde_json::to_value(&event)?)
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        Ok(())
+    }
+
+    async fn write_opt_out_event(
+        &mut self,
+        event: urc_common::OperatorOptedOut,
+        event_id: i64,
+        tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        // Insert new record with opted_out_at for history
+        sqlx::query(sql_constants::INSERT_OPERATOR_SLASHER_COMMITMENT_OPTOUT_SELECT)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(event_id)
+            .bind(self.writer_id)
+            .bind(event.slasher.as_slice())
+            .execute(tx.as_mut())
+            .await?;
+
+        // Insert operator_data record for audit
+        sqlx::query(sql_constants::INSERT_OPERATOR_DATA_OPTED_OUT)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(serde_json::to_value(&event)?)
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        Ok(())
+    }
+
+    async fn write_collateral_claimed_event(
+        &mut self,
+        event: urc_common::CollateralClaimed,
+        event_id: i64,
+        tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        // Insert collateral change record (negative delta for claim)
+        let amount_negative = format!("-{}", event.collateralWei);
+
+        sqlx::query(sql_constants::INSERT_OPERATOR_COLLATERAL_DELTA)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(amount_negative)
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        // Insert operator_data record for collateral claimed event
+        sqlx::query(sql_constants::INSERT_OPERATOR_DATA_COLLATERAL_CLAIMED)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(serde_json::to_value(&event)?)
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        Ok(())
+    }
+
+    async fn write_collateral_added_event(
+        &mut self,
+        event: urc_common::CollateralAdded,
+        event_id: i64,
+        tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        // Insert collateral change record (positive delta for addition)
+        sqlx::query(sql_constants::INSERT_OPERATOR_COLLATERAL_DELTA)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(event.collateralWei.to_string())
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        // Insert operator_data record for collateral added event
+        sqlx::query(sql_constants::INSERT_OPERATOR_DATA_COLLATERAL_ADDED)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(serde_json::to_value(&event)?)
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        Ok(())
+    }
+
+    async fn write_slashing_event(
+        &mut self,
+        event: urc_common::OperatorSlashed,
+        amount: urc_common::events::SlashAmountWei,
+        call: urc_common::events::SlashingCall,
+        event_id: i64,
+        tx: &mut Transaction<'static, sqlx::Postgres>,
+    ) -> Result<()> {
+        // Ensure addresses exist
+        for (addr, is_contract) in [
+            (event.owner.as_slice(), None),         // Owner - unknown
+            (event.challenger.as_slice(), None),    // Challenger - unknown
+            (event.slasher.as_slice(), Some(true)), // Slasher is a contract
+        ] {
+            sqlx::query(sql_constants::INSERT_ADDRESS)
+                .bind(addr)
+                .bind(self.chain_id)
+                .bind(is_contract)
+                .execute(tx.as_mut())
+                .await?;
+        }
+
+        // Insert operator_data record first to get ID
+        let operator_data_id: Uuid =
+            sqlx::query_scalar(sql_constants::INSERT_OPERATOR_DATA_SLASHED)
+                .bind(event.registrationRoot.as_slice())
+                .bind(self.chain_id)
+                .bind(serde_json::to_value(&event)?)
+                .bind(event_id)
+                .bind(matches!(call, urc_common::events::SlashingCall::Equivocation { .. }))
+                .bind(event_id)
+                .bind(self.writer_id)
+                .fetch_one(tx.as_mut())
+                .await?;
+
+        // Handle different slash types
+        match &call {
+            urc_common::events::SlashingCall::Fraud { registration_proof: _ } => {
+                // TODO: Extract and insert signed commitment from registration proof
+                let signed_commitment_id = Uuid::new_v4();
+
+                sqlx::query(sql_constants::INSERT_SLASH_REGISTRATION)
+                    .bind(event_id)
+                    .bind(operator_data_id)
+                    .bind(signed_commitment_id)
+                    .bind(event.challenger.as_slice())
+                    .bind("0") // TODO: Calculate reward split
+                    .bind(event.slashAmountWei.to_string())
+                    .bind(self.writer_id)
+                    .execute(tx.as_mut())
+                    .await?;
+            },
+
+            urc_common::events::SlashingCall::Commitment {
+                registration_proof: _,
+                delegation: _,
+                commitment,
+            } => {
+                // TODO: Insert signed delegation and commitment
+                let signed_delegation_id = Uuid::new_v4();
+                let signed_commitment_id = Uuid::new_v4();
+
+                // Insert committer
+                let committer_id: Uuid =
+                    sqlx::query_scalar(sql_constants::INSERT_COMMITTER_VARIANT)
+                        .bind(commitment.commitment.slasher.as_slice())
+                        .bind(self.writer_id)
+                        .fetch_one(tx.as_mut())
+                        .await?;
+
+                sqlx::query(sql_constants::INSERT_SLASH_OFFCHAIN_DELEGATION_COMMITMENT)
+                    .bind(operator_data_id)
+                    .bind(signed_delegation_id)
+                    .bind(signed_commitment_id)
+                    .bind(committer_id)
+                    .bind(event.challenger.as_slice())
+                    .bind("0") // TODO: Calculate reward split
+                    .bind(event.slashAmountWei.to_string())
+                    .bind(self.writer_id)
+                    .execute(tx.as_mut())
+                    .await?;
+            },
+
+            urc_common::events::SlashingCall::SlasherCommitment {
+                registration_root: _,
+                commitment,
+                evidence,
+            } => {
+                // TODO: Insert signed commitment
+                let signed_commitment_id = Uuid::new_v4();
+
+                // Insert committer
+                let committer_id: Uuid =
+                    sqlx::query_scalar(sql_constants::INSERT_COMMITTER_VARIANT)
+                        .bind(commitment.commitment.slasher.as_slice())
+                        .bind(self.writer_id)
+                        .fetch_one(tx.as_mut())
+                        .await?;
+
+                sqlx::query(sql_constants::INSERT_SLASH_COMMITMENT_VARIANT)
+                    .bind(operator_data_id)
+                    .bind(signed_commitment_id)
+                    .bind(committer_id)
+                    .bind(event.challenger.as_slice())
+                    .bind(evidence.as_slice())
+                    .bind("0") // TODO: Calculate reward split
+                    .bind(event.slashAmountWei.to_string())
+                    .bind(self.writer_id)
+                    .execute(tx.as_mut())
+                    .await?;
+            },
+
+            urc_common::events::SlashingCall::Equivocation {
+                registration_proof: _,
+                delegation_one: _,
+                delegation_two: _,
+            } => {
+                // TODO: Insert both delegations
+                let delegation_id_1 = Uuid::new_v4();
+                let delegation_id_2 = Uuid::new_v4();
+
+                sqlx::query(sql_constants::INSERT_SLASH_EQUIVOCATION_VARIANT)
+                    .bind(operator_data_id)
+                    .bind(delegation_id_1)
+                    .bind(delegation_id_2)
+                    .bind(event.challenger.as_slice())
+                    .bind("0") // TODO: Calculate reward split
+                    .bind(event.slashAmountWei.to_string())
+                    .bind(self.writer_id)
+                    .execute(tx.as_mut())
+                    .await?;
+            },
+        }
+
+        // Update operator collateral
+        let amount_negative = format!("-{}", amount);
+        sqlx::query(sql_constants::INSERT_OPERATOR_COLLATERAL_NEGATIVE_VARIANT)
+            .bind(event.registrationRoot.as_slice())
+            .bind(self.chain_id)
+            .bind(amount_negative)
+            .bind(event_id)
+            .bind(self.writer_id)
+            .execute(tx.as_mut())
+            .await?;
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Db;
+    use alloy_primitives::{address, Address, FixedBytes, B256, U256};
+    use sqlx::Row;
+    use testcontainers::{
+        core::{ContainerPort, WaitFor},
+        runners::AsyncRunner,
+        GenericImage, ImageExt,
+    };
+
+    async fn setup_test_db() -> (testcontainers::ContainerAsync<GenericImage>, String) {
+        let image = GenericImage::new("timescale/timescaledb", "latest-pg15")
+            .with_exposed_port(ContainerPort::Tcp(5432))
+            .with_wait_for(WaitFor::message_on_stderr(
+                "database system is ready to accept connections",
+            ))
+            .with_env_var("POSTGRES_USER", "postgres")
+            .with_env_var("POSTGRES_PASSWORD", "postgres")
+            .with_env_var("POSTGRES_DB", "test_db");
+
+        let container = image.start().await.expect("Failed to start container");
+        let host_port = container.get_host_port_ipv4(5432).await.expect("Failed to get port");
+
+        let connection_string =
+            format!("postgresql://postgres:postgres@127.0.0.1:{}/test_db", host_port);
+        (container, connection_string)
+    }
+
+    fn create_test_validation_result(
+        registration_root: B256,
+    ) -> urc_common::events::RegistrationValidationResult {
+        urc_common::events::RegistrationValidationResult {
+            has_fraudulent: false,
+            tree: urc_common::events::MerkleTreeData {
+                root: registration_root,
+                leaves: vec![B256::from([1; 32]), B256::from([2; 32])],
+            },
+            signature: vec![urc_common::events::RegistrationSignatureValidation {
+                is_fraudulent: false,
+                signature_index: 0,
+                merkle_proof: vec![FixedBytes::from([3; 32]), FixedBytes::from([4; 32])],
+                signature_data: urc_common::BLS::G2Point {
+                    x_c0_a: FixedBytes::from([5; 32]),
+                    x_c0_b: FixedBytes::from([6; 32]),
+                    x_c1_a: FixedBytes::from([7; 32]),
+                    x_c1_b: FixedBytes::from([8; 32]),
+                    y_c0_a: FixedBytes::from([9; 32]),
+                    y_c0_b: FixedBytes::from([10; 32]),
+                    y_c1_a: FixedBytes::from([11; 32]),
+                    y_c1_b: FixedBytes::from([12; 32]),
+                },
+                pubkey_data: urc_common::BLS::G1Point {
+                    x_a: FixedBytes::from([13; 32]),
+                    x_b: FixedBytes::from([14; 32]),
+                    y_a: FixedBytes::from([15; 32]),
+                    y_b: FixedBytes::from([16; 32]),
+                },
+            }],
+        }
+    }
+
+    fn create_test_block_with_event(block_number: u64, parent_work_id: Option<B256>) -> UrciBlockUpdate {
+        use alloy_primitives::{Log, LogData};
+        use urc_common::events::{UrcTxEvent, UrciBlockUpdate, UrcEvent, UrcEventKind};
+
+        let block_hash = B256::from([block_number as u8; 32]);
+        let parent_hash = if block_number == 1 {
+            B256::ZERO
+        } else {
+            B256::from([(block_number - 1) as u8; 32])
+        };
+
+        let tx_hash = B256::from([100 + block_number as u8; 32]);
+        let registry_address = address!("0000000000000000000000000000000000000001");
+        // Use different owner for each block to avoid duplicate key violations
+        let owner_bytes = [block_number as u8; 20];
+        let owner = Address::from_slice(&owner_bytes);
+
+        // Create a dummy log for the event
+        let log = Log {
+            address: registry_address,
+            data: LogData::new_unchecked(vec![], Default::default()),
+        };
+
+        // Create UrcEvent - registration for block 1, collateral added for others
+        let event_kind = if block_number == 1 {
+            UrcEventKind::Registration(
+                owner,
+                urc_common::OperatorRegistered {
+                    registrationRoot: B256::from([block_number as u8; 32]).into(),
+                    collateralWei: U256::from(1000),
+                    owner,
+                },
+                Ok(create_test_validation_result(B256::from([block_number as u8; 32]))),
+            )
+        } else {
+            // For subsequent blocks, use CollateralAdded to avoid duplicate registration
+            UrcEventKind::CollateralAdded(urc_common::CollateralAdded {
+                registrationRoot: B256::from([1u8; 32]).into(), // Reference block 1's registration
+                collateralWei: U256::from(500 * block_number),
+            })
+        };
+
+        let urc_event = UrcEvent {
+            caller_address: owner,
+            call_depth: 0,
+            call_index_at_depth: 0,
+            input: None,
+            log_index: block_number,
+            event: event_kind,
+        };
+
+        // Create a test UrcTxEvent using Default and field updates
+        let tx_event = UrcTxEvent {
+            tx_sender_address: owner,
+            tx_value: U256::ZERO,
+            tx_type: 0,
+            transaction_hash: tx_hash,
+            transaction_index: 0,
+            transaction_input: None,
+            urc_logs: vec![(log, block_number)],
+            urc_events: vec![urc_event],
+            trace: vec![],
+            ..Default::default()
+        };
+
+        UrciBlockUpdate {
+            block_number,
+            block_hash,
+            parent_block_hash: parent_hash,
+            work_id: None, // Will be generated by DB
+            parent_work_id,
+            events: vec![tx_event],
+            reorged: false,
+        }
+    }
+
+    static mut TEST_LOG_INDEX: i32 = 0;
+
+    async fn setup_test_prerequisites(
+        tx: &mut Transaction<'static, sqlx::Postgres>,
+        chain_id: i64,
+        event_type: &str,
+        owner: Address,
+        registry_address: Address,
+    ) -> Result<i64> {
+        // Insert chain config first
+        sqlx::query(crate::sql_constants::INSERT_CHAIN)
+            .bind(chain_id)
+            .bind("test-chain")
+            .execute(&mut **tx)
+            .await?;
+
+        // Insert chain_roots config
+        sqlx::query(crate::sql_constants::INSERT_CHAIN_ROOTS_IGNORE)
+            .bind(chain_id)
+            .bind(0i64)
+            .execute(&mut **tx)
+            .await?;
+
+        // Insert addresses (needed for foreign keys)
+        sqlx::query("INSERT INTO address (address, chain_id, is_contract) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+            .bind(owner.as_slice())
+            .bind(chain_id)
+            .bind(None::<bool>) // NULL for unknown
+            .execute(&mut **tx)
+            .await?;
+
+        sqlx::query("INSERT INTO address (address, chain_id, is_contract) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING")
+            .bind(registry_address.as_slice())
+            .bind(chain_id)
+            .bind(Some(true)) // Registry is a contract
+            .execute(&mut **tx)
+            .await?;
+
+        // Insert block
+        let block_hash = B256::from([1; 32]);
+        let tx_hash = B256::from([2; 32]);
+
+        sqlx::query("INSERT INTO blocks (chain_id, hash, parent_hash, number, timestamp, canonical, finalized)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                     ON CONFLICT (chain_id, hash) DO NOTHING")
+            .bind(chain_id)
+            .bind(block_hash.as_slice())
+            .bind(B256::ZERO.as_slice()) // Parent hash (genesis for test)
+            .bind(1i64)
+            .bind(1000000i64) // Unix timestamp
+            .bind(true)
+            .bind(false)
+            .execute(&mut **tx)
+            .await?;
+
+        // Insert transaction
+        sqlx::query("INSERT INTO transactions (hash, block_hash, chain_id, from_address, to_address, gas, gas_price, nonce, tx_index)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7::NUMERIC, $8, $9)
+                     ON CONFLICT (chain_id, hash) DO NOTHING")
+            .bind(tx_hash.as_slice())
+            .bind(block_hash.as_slice())
+            .bind(chain_id)
+            .bind(owner.as_slice())
+            .bind(registry_address.as_slice())
+            .bind(100000i64) // gas
+            .bind("1000000000") // gas_price (1 gwei) - will be cast to NUMERIC
+            .bind(0i64) // nonce
+            .bind(0i32) // tx_index
+            .execute(&mut **tx)
+            .await?;
+
+        // Insert event and return the generated ID
+        // Note: events table needs block info and decoded data
+        // Use a unique log_index for each event
+        let log_index = unsafe {
+            let idx = TEST_LOG_INDEX;
+            TEST_LOG_INDEX += 1;
+            idx
+        };
+
+        let event_id: i64 = sqlx::query_scalar(
+            "INSERT INTO events (chain_id, block_number, block_hash, tx_hash, tx_index, log_index, event_type, decoded_data)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id")
+            .bind(chain_id)
+            .bind(1i64) // block_number
+            .bind(block_hash.as_slice())
+            .bind(tx_hash.as_slice())
+            .bind(0i32) // tx_index
+            .bind(log_index) // unique log_index
+            .bind(event_type)
+            .bind(serde_json::json!({})) // empty decoded_data for test
+            .fetch_one(&mut **tx)
+            .await?;
+
+        Ok(event_id)
+    }
+
+    #[tokio::test]
+    async fn test_write_registration_event() {
+        let (_container, db_url) = setup_test_db().await;
+        let chain_id = 1i64;
+
+        let mut adapter = PostgresAdapter::connect_new(chain_id, &db_url)
+            .await
+            .expect("Failed to connect");
+
+        // Initialize DB
+        let registry_address = address!("0000000000000000000000000000000000000001");
+        adapter.initialize(registry_address, 1).await.expect("Failed to initialize");
+
+        let pool = adapter.pool.clone();
+        let mut tx = pool.begin().await.unwrap();
+
+        // Create a test registration event
+        let registration_root = B256::from([100; 32]);
+        let owner = address!("0x1111111111111111111111111111111111111111");
+
+        // Setup prerequisites (block, transaction, event)
+        let event_id = setup_test_prerequisites(
+            &mut tx,
+            chain_id,
+            "OperatorRegistered",
+            owner,
+            registry_address,
+        )
+        .await
+        .expect("Failed to setup prerequisites");
+
+        let result = <PostgresAdapter as AdapterWriter>::write_registration_event(
+            &mut adapter,
+            owner,
+            urc_common::OperatorRegistered {
+                registrationRoot: registration_root.into(),
+                collateralWei: U256::from(1000),
+                owner,
+            },
+            create_test_validation_result(registration_root),
+            event_id,
+            &mut tx,
+        )
+        .await;
+
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+
+        // Commit and verify the merkle tree was inserted
+        tx.commit().await.unwrap();
+
+        let row = sqlx::query("SELECT leaf_count FROM merkle_tree WHERE root = $1")
+            .bind(registration_root.as_slice())
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let leaf_count: i32 = row.get("leaf_count");
+        assert_eq!(leaf_count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_write_unregistration_event() {
+        let (_container, db_url) = setup_test_db().await;
+        let chain_id = 1i64;
+
+        let mut adapter = PostgresAdapter::connect_new(chain_id, &db_url)
+            .await
+            .expect("Failed to connect");
+
+        let registry_address = address!("0000000000000000000000000000000000000001");
+        adapter.initialize(registry_address, 1).await.expect("Failed to initialize");
+
+        let pool = adapter.pool.clone();
+        let mut tx = pool.begin().await.unwrap();
+
+        // First register an operator
+        let registration_root = B256::from([100; 32]);
+        let owner = address!("0x1111111111111111111111111111111111111111");
+
+        // Setup prerequisites for registration event
+        let reg_event_id = setup_test_prerequisites(
+            &mut tx,
+            chain_id,
+            "OperatorRegistered",
+            owner,
+            registry_address,
+        )
+        .await
+        .expect("Failed to setup prerequisites for registration");
+
+        <PostgresAdapter as AdapterWriter>::write_registration_event(
+            &mut adapter,
+            owner,
+            urc_common::OperatorRegistered {
+                registrationRoot: registration_root.into(),
+                collateralWei: U256::from(1000),
+                owner,
+            },
+            create_test_validation_result(registration_root),
+            reg_event_id,
+            &mut tx,
+        )
+        .await
+        .unwrap();
+
+        // Setup prerequisites for unregistration event
+        let unreg_event_id = setup_test_prerequisites(
+            &mut tx,
+            chain_id,
+            "OperatorUnregistered",
+            owner,
+            registry_address,
+        )
+        .await
+        .expect("Failed to setup prerequisites for unregistration");
+
+        // Then unregister
+        let result = <PostgresAdapter as AdapterWriter>::write_unregistration_event(
+            &mut adapter,
+            urc_common::OperatorUnregistered { registrationRoot: registration_root.into() },
+            unreg_event_id,
+            &mut tx,
+        )
+        .await;
+
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        tx.commit().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_writer_status_tracks_last_indexed_event() {
+        let (_container, db_url) = setup_test_db().await;
+        let chain_id = 1i64;
+
+        let mut adapter = PostgresAdapter::connect_new(chain_id, &db_url)
+            .await
+            .expect("Failed to connect");
+
+        let registry_address = address!("0000000000000000000000000000000000000001");
+        adapter.initialize(registry_address, 1).await.expect("Failed to initialize");
+
+        let pool = adapter.pool.clone();
+
+        // Create first block with an event using write_block API
+        let block_1 = create_test_block_with_event(1, None);
+        adapter.write_block(block_1).await.expect("Failed to write block 1");
+
+        // Verify writer_status was updated with last_indexed_event_id
+        let writer_id = adapter.writer_id.expect("Writer ID should be set");
+        let session_id = adapter.session_id.clone().expect("Session ID should be set");
+
+        let row = sqlx::query(
+            "SELECT last_indexed_event_id FROM writer_status
+             WHERE writer_id = $1 AND session_id = $2 AND chain_id = $3"
+        )
+        .bind(writer_id)
+        .bind(&session_id)
+        .bind(chain_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to fetch writer_status");
+
+        let last_event_1: Option<i64> = row.get("last_indexed_event_id");
+        assert!(last_event_1.is_some(), "writer_status should track the last indexed event_id");
+
+        // Get the work_id from block 1 to use as parent for block 2
+        let parent_work_id: Vec<u8> = sqlx::query_scalar(
+            sql_constants::SELECT_BLOCK_WORK_ID
+        )
+        .bind(chain_id)
+        .bind(1i64)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to get block 1 work_id");
+
+        // Convert Vec<u8> to B256
+        let parent_work_id_b256 = B256::from_slice(&parent_work_id);
+
+        // Create second block with an event
+        let block_2 = create_test_block_with_event(2, Some(parent_work_id_b256));
+        adapter.write_block(block_2).await.expect("Failed to write block 2");
+
+        // Verify writer_status now has the second event_id
+        let row2 = sqlx::query(
+            "SELECT last_indexed_event_id FROM writer_status
+             WHERE writer_id = $1 AND session_id = $2 AND chain_id = $3"
+        )
+        .bind(writer_id)
+        .bind(&session_id)
+        .bind(chain_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to fetch writer_status after second event");
+
+        let last_event_2: Option<i64> = row2.get("last_indexed_event_id");
+        assert!(last_event_2.is_some(), "writer_status should have event_id after block 2");
+        assert!(
+            last_event_2.unwrap() > last_event_1.unwrap(),
+            "writer_status should update to track the latest indexed event_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_last_finalized_block_view_by_chain() {
+        let (_container, db_url) = setup_test_db().await;
+        let chain_id = 1i64;
+
+        let mut adapter = PostgresAdapter::connect_new(chain_id, &db_url)
+            .await
+            .expect("Failed to connect");
+
+        let registry_address = address!("0000000000000000000000000000000000000001");
+        adapter.initialize(registry_address, 1).await.expect("Failed to initialize");
+
+        let pool = adapter.pool.clone();
+
+        // Insert multiple blocks, tracking parent_work_id
+        let mut parent_work_id: Option<Vec<u8>> = None;
+        for i in 1..=5 {
+            let block_hash = B256::from([i as u8; 32]);
+            let parent_hash = if i == 1 { B256::ZERO } else { B256::from([(i - 1) as u8; 32]) };
+
+            let work_id: Vec<u8> = sqlx::query_scalar(
+                sql_constants::INSERT_BLOCK_RETURNING_WORK_ID
+            )
+            .bind(chain_id)
+            .bind(i as i64)
+            .bind(block_hash.as_slice())
+            .bind(parent_hash.as_slice())
+            .bind(&parent_work_id)
+            .bind(1000000i64 + i)
+            .bind(true)  // canonical
+            .bind(i <= 3) // blocks 1-3 are finalized
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to insert block");
+
+            parent_work_id = Some(work_id);
+        }
+
+        // Query the view for last finalized block for this chain
+        let row = sqlx::query(
+            "SELECT number, hash FROM view_last_finalized_block_by_chain WHERE chain_id = $1"
+        )
+        .bind(chain_id)
+        .fetch_optional(&pool)
+        .await
+        .expect("Failed to query view_last_finalized_block_by_chain");
+
+        assert!(row.is_some(), "View should return a row for chain with finalized blocks");
+        let row = row.unwrap();
+        let number: i64 = row.get("number");
+        let hash: Vec<u8> = row.get("hash");
+
+        assert_eq!(number, 3, "Last finalized block should be block 3");
+        assert_eq!(hash, B256::from([3u8; 32]).as_slice(), "Hash should match block 3");
+    }
+
+    #[tokio::test]
+    async fn test_finalizer_deletes_empty_finalized_blocks() {
+        let (_container, db_url) = setup_test_db().await;
+        let chain_id = 1i64;
+
+        let mut adapter = PostgresAdapter::connect_new(chain_id, &db_url)
+            .await
+            .expect("Failed to connect");
+
+        let registry_address = address!("0000000000000000000000000000000000000001");
+        adapter.initialize(registry_address, 1).await.expect("Failed to initialize");
+
+        let pool = adapter.pool.clone();
+        let writer_id = adapter.writer_id.expect("Writer ID should be set");
+        let session_id = adapter.session_id.as_ref().expect("Session ID should be set");
+
+        // Insert blocks: 1-5, where blocks 1-3 are finalized
+        // Block 1 and 3 have events, block 2 doesn't
+        let mut tx = pool.begin().await.unwrap();
+
+        let owner = address!("0x1111111111111111111111111111111111111111");
+
+        // Block 1 with event
+        let event_id_1 = setup_test_prerequisites(
+            &mut tx,
+            chain_id,
+            "OperatorRegistered",
+            owner,
+            registry_address,
+        )
+        .await
+        .expect("Failed to setup block 1");
+
+        // Block 2 - insert manually without events
+        // First get parent work_id from block 1
+        let parent_work_id_2: Vec<u8> = sqlx::query_scalar(
+            sql_constants::SELECT_BLOCK_WORK_ID
+        )
+        .bind(chain_id)
+        .bind(1i64)
+        .fetch_one(tx.as_mut())
+        .await
+        .expect("Failed to get parent work_id for block 2");
+
+        let block_2_hash = B256::from([102; 32]);
+        let _work_id_2: Vec<u8> = sqlx::query_scalar(
+            sql_constants::INSERT_BLOCK_RETURNING_WORK_ID
+        )
+        .bind(chain_id)
+        .bind(2i64)
+        .bind(block_2_hash.as_slice())
+        .bind(B256::from([1; 32]).as_slice())
+        .bind(parent_work_id_2)
+        .bind(2000000i64)
+        .bind(true)
+        .bind(true) // Finalized
+        .fetch_one(tx.as_mut())
+        .await
+        .expect("Failed to insert block 2");
+
+        // Block 3 with event (need new block setup)
+        // First get parent work_id from block 2
+        let parent_work_id_3: Vec<u8> = sqlx::query_scalar(
+            sql_constants::SELECT_BLOCK_WORK_ID
+        )
+        .bind(chain_id)
+        .bind(2i64)
+        .fetch_one(tx.as_mut())
+        .await
+        .expect("Failed to get parent work_id for block 3");
+
+        let block_3_hash = B256::from([103; 32]);
+        let _work_id_3: Vec<u8> = sqlx::query_scalar(
+            sql_constants::INSERT_BLOCK_RETURNING_WORK_ID
+        )
+        .bind(chain_id)
+        .bind(3i64)
+        .bind(block_3_hash.as_slice())
+        .bind(block_2_hash.as_slice())
+        .bind(parent_work_id_3)
+        .bind(3000000i64)
+        .bind(true)
+        .bind(true) // Finalized
+        .fetch_one(tx.as_mut())
+        .await
+        .expect("Failed to insert block 3");
+
+        // Insert event for block 3
+        let event_id_3: i64 = sqlx::query_scalar(
+            "INSERT INTO events (chain_id, block_number, block_hash, tx_hash, tx_index, log_index, event_type, decoded_data)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id"
+        )
+        .bind(chain_id)
+        .bind(3i64)
+        .bind(block_3_hash.as_slice())
+        .bind(B256::from([2; 32]).as_slice())
+        .bind(0i32)
+        .bind(10i32) // Different log index
+        .bind("CollateralAdded")
+        .bind(serde_json::json!({}))
+        .fetch_one(tx.as_mut())
+        .await
+        .expect("Failed to insert event for block 3");
+
+        tx.commit().await.unwrap();
+
+        // Verify blocks exist before finalization
+        let count_before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM blocks WHERE chain_id = $1")
+            .bind(chain_id)
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to count blocks");
+
+        // Should have blocks 1, 2, 3
+        assert_eq!(count_before, 3, "Should have 3 blocks before finalizer runs");
+
+        // Call finalizer function for this writer's session
+        sqlx::query("SELECT finalize_session_blocks($1, $2, $3)")
+            .bind(writer_id)
+            .bind(session_id)
+            .bind(chain_id)
+            .execute(&pool)
+            .await
+            .expect("Failed to run finalizer function");
+
+        // Verify block 2 (empty finalized block) was deleted
+        let remaining_blocks: Vec<i64> = sqlx::query_scalar(
+            "SELECT number FROM blocks WHERE chain_id = $1 ORDER BY number"
+        )
+        .bind(chain_id)
+        .fetch_all(&pool)
+        .await
+        .expect("Failed to fetch remaining blocks");
+
+        assert_eq!(
+            remaining_blocks,
+            vec![1, 3],
+            "Block 2 (empty finalized block) should be deleted, blocks 1 and 3 should remain"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fork_view_tracks_active_event_id() {
+        let (_container, db_url) = setup_test_db().await;
+        let chain_id = 1i64;
+
+        let mut adapter = PostgresAdapter::connect_new(chain_id, &db_url)
+            .await
+            .expect("Failed to connect");
+
+        let registry_address = address!("0000000000000000000000000000000000000001");
+        adapter.initialize(registry_address, 1).await.expect("Failed to initialize");
+
+        let pool = adapter.pool.clone();
+
+        // Scenario: Two writers see the same block height but with different events (fork)
+        // Writer 1 (our adapter) sees block 10 with event A
+        // Writer 2 will see block 10 with event B
+
+        let mut tx = pool.begin().await.unwrap();
+        let owner = address!("0x1111111111111111111111111111111111111111");
+
+        // Create block 10 with event A for writer 1
+        let block_10_hash_a = B256::from([10; 32]);
+        let event_id_a = setup_test_prerequisites(
+            &mut tx,
+            chain_id,
+            "OperatorRegistered",
+            owner,
+            registry_address,
+        )
+        .await
+        .expect("Failed to setup event A");
+
+        // Manually set the block number to 10
+        sqlx::query("UPDATE blocks SET number = 10 WHERE hash = $1 AND chain_id = $2")
+            .bind(block_10_hash_a.as_slice())
+            .bind(chain_id)
+            .execute(tx.as_mut())
+            .await
+            .expect("Failed to update block number");
+
+        sqlx::query("UPDATE events SET block_number = 10 WHERE id = $1")
+            .bind(event_id_a)
+            .execute(tx.as_mut())
+            .await
+            .expect("Failed to update event block number");
+
+        // Update blocks table to track active_event_id
+        sqlx::query("UPDATE blocks SET active_event_id = $1 WHERE hash = $2 AND chain_id = $3")
+            .bind(event_id_a)
+            .bind(block_10_hash_a.as_slice())
+            .bind(chain_id)
+            .execute(tx.as_mut())
+            .await
+            .expect("Failed to set active_event_id for block A");
+
+        tx.commit().await.unwrap();
+
+        // Now simulate writer 2 seeing a different block 10 (fork scenario)
+        let writer_2_id = uuid::Uuid::new_v4();
+        let session_2_id = format!("session_{}", uuid::Uuid::new_v4());
+
+        // Insert writer 2
+        sqlx::query(
+            "INSERT INTO writers (id, name, session, config)
+             VALUES ($1, $2, $3, $4)"
+        )
+        .bind(writer_2_id)
+        .bind("writer_2")
+        .bind(&session_2_id)
+        .bind(serde_json::json!({"chain_id": chain_id}))
+        .execute(&pool)
+        .await
+        .expect("Failed to insert writer 2");
+
+        let mut tx2 = pool.begin().await.unwrap();
+
+        // Get parent_work_id for block 10 (from block 9, which we need to create first)
+        // For this test, let's create a proper chain up to block 10
+        // First, get the work_id from block created by setup_test_prerequisites
+        let parent_work_id_for_10: Vec<u8> = sqlx::query_scalar(
+            "SELECT work_id FROM blocks WHERE chain_id = $1 ORDER BY number DESC LIMIT 1"
+        )
+        .bind(chain_id)
+        .fetch_one(tx2.as_mut())
+        .await
+        .expect("Failed to get parent work_id for block 10");
+
+        let block_10_hash_b = B256::from([110; 32]); // Different hash for fork
+        let _work_id_b: Vec<u8> = sqlx::query_scalar(
+            sql_constants::INSERT_BLOCK_RETURNING_WORK_ID
+        )
+        .bind(chain_id)
+        .bind(10i64)
+        .bind(block_10_hash_b.as_slice())
+        .bind(B256::ZERO.as_slice())
+        .bind(parent_work_id_for_10)
+        .bind(10000000i64)
+        .bind(true)
+        .bind(false)
+        .fetch_one(tx2.as_mut())
+        .await
+        .expect("Failed to insert block B");
+
+        // Insert event B for block 10 from writer 2
+        let event_id_b: i64 = sqlx::query_scalar(
+            "INSERT INTO events (chain_id, block_number, block_hash, tx_hash, tx_index, log_index, event_type, decoded_data, writer_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             RETURNING id"
+        )
+        .bind(chain_id)
+        .bind(10i64)
+        .bind(block_10_hash_b.as_slice())
+        .bind(B256::from([200; 32]).as_slice())
+        .bind(0i32)
+        .bind(20i32)
+        .bind("CollateralAdded")
+        .bind(serde_json::json!({}))
+        .bind(writer_2_id)
+        .fetch_one(tx2.as_mut())
+        .await
+        .expect("Failed to insert event B");
+
+        // Set active_event_id for block B
+        sqlx::query("UPDATE blocks SET active_event_id = $1 WHERE hash = $2 AND chain_id = $3")
+            .bind(event_id_b)
+            .bind(block_10_hash_b.as_slice())
+            .bind(chain_id)
+            .execute(tx2.as_mut())
+            .await
+            .expect("Failed to set active_event_id for block B");
+
+        tx2.commit().await.unwrap();
+
+        // Query the fork view to get unique head events at block height 10
+        let rows = sqlx::query(
+            "SELECT DISTINCT active_event_id, hash FROM view_fork_head_events
+             WHERE chain_id = $1 AND number = $2
+             ORDER BY active_event_id"
+        )
+        .bind(chain_id)
+        .bind(10i64)
+        .fetch_all(&pool)
+        .await
+        .expect("Failed to query view_fork_head_events");
+
+        assert_eq!(rows.len(), 2, "Should see 2 different head events at block 10 (fork detected)");
+
+        let event_ids: Vec<i64> = rows.iter().map(|r| r.get("active_event_id")).collect();
+        assert!(
+            event_ids.contains(&event_id_a) && event_ids.contains(&event_id_b),
+            "Should see both event A and event B as active events at block 10"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_block_active_event_id_reflects_last_event() {
+        let (_container, db_url) = setup_test_db().await;
+        let chain_id = 1i64;
+
+        let mut adapter = PostgresAdapter::connect_new(chain_id, &db_url)
+            .await
+            .expect("Failed to connect");
+
+        let registry_address = address!("0000000000000000000000000000000000000001");
+        adapter.initialize(registry_address, 1).await.expect("Failed to initialize");
+
+        let pool = adapter.pool.clone();
+
+        let owner = address!("0x1111111111111111111111111111111111111111");
+        let block_hash = B256::from([50; 32]);
+        let block_number = 5i64;
+
+        // Insert block first - get parent_work_id from root block
+        let parent_work_id: Vec<u8> = sqlx::query_scalar(
+            "SELECT work_id FROM blocks WHERE chain_id = $1 AND is_root = true"
+        )
+        .bind(chain_id)
+        .fetch_one(tx.as_mut())
+        .await
+        .expect("Failed to get root block work_id");
+
+        let _work_id: Vec<u8> = sqlx::query_scalar(
+            sql_constants::INSERT_BLOCK_RETURNING_WORK_ID
+        )
+        .bind(chain_id)
+        .bind(block_number)
+        .bind(block_hash.as_slice())
+        .bind(B256::ZERO.as_slice())
+        .bind(parent_work_id)
+        .bind(5000000i64)
+        .bind(true)
+        .bind(false)
+        .fetch_one(tx.as_mut())
+        .await
+        .expect("Failed to insert block");
+
+        // Insert transaction
+        let tx_hash = B256::from([51; 32]);
+        sqlx::query(
+            "INSERT INTO transactions (chain_id, hash, block_hash, from_address, to_address, value, gas, gas_price, nonce, tx_index)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::NUMERIC, $9, $10)"
+        )
+        .bind(chain_id)
+        .bind(tx_hash.as_slice())
+        .bind(block_hash.as_slice())
+        .bind(owner.as_slice())
+        .bind(registry_address.as_slice())
+        .bind(0i64)
+        .bind(100000i64)
+        .bind("1000000000")
+        .bind(0i64)
+        .bind(0i32)
+        .execute(tx.as_mut())
+        .await
+        .expect("Failed to insert transaction");
+
+        // Insert first event
+        let event_id_1: i64 = sqlx::query_scalar(
+            "INSERT INTO events (chain_id, block_number, block_hash, tx_hash, tx_index, log_index, event_type, decoded_data, writer_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             RETURNING id"
+        )
+        .bind(chain_id)
+        .bind(block_number)
+        .bind(block_hash.as_slice())
+        .bind(tx_hash.as_slice())
+        .bind(0i32)
+        .bind(0i32)
+        .bind("OperatorRegistered")
+        .bind(serde_json::json!({}))
+        .bind(adapter.writer_id)
+        .fetch_one(tx.as_mut())
+        .await
+        .expect("Failed to insert event 1");
+
+        // Insert second event (this should be the active one)
+        let event_id_2: i64 = sqlx::query_scalar(
+            "INSERT INTO events (chain_id, block_number, block_hash, tx_hash, tx_index, log_index, event_type, decoded_data, writer_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             RETURNING id"
+        )
+        .bind(chain_id)
+        .bind(block_number)
+        .bind(block_hash.as_slice())
+        .bind(tx_hash.as_slice())
+        .bind(0i32)
+        .bind(1i32)
+        .bind("CollateralAdded")
+        .bind(serde_json::json!({}))
+        .bind(adapter.writer_id)
+        .fetch_one(tx.as_mut())
+        .await
+        .expect("Failed to insert event 2");
+
+        tx.commit().await.unwrap();
+
+        // Now update the block with active_event_id using the UPSERT logic
+        // This simulates what write_block() does
+        let last_event_id = sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT MAX(id) FROM events WHERE block_hash = $1 AND chain_id = $2"
+        )
+        .bind(block_hash.as_slice())
+        .bind(chain_id)
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to get max event id");
+
+        assert_eq!(last_event_id, Some(event_id_2), "MAX(id) should be the second event");
+
+        // Update block with active_event_id using UPSERT
+        sqlx::query(sql_constants::INSERT_BLOCK_UPSERT)
+            .bind(chain_id)
+            .bind(block_number)
+            .bind(block_hash.as_slice())
+            .bind(B256::ZERO.as_slice())
+            .bind(None::<Vec<u8>>) // parent_work_id
+            .bind(true)  // canonical
+            .bind(false) // finalized
+            .bind(5000000i64) // timestamp
+            .bind(last_event_id) // active_event_id
+            .execute(&pool)
+            .await
+            .expect("Failed to update block with active_event_id");
+
+        // Verify the block has the correct active_event_id (should be the last event)
+        let row = sqlx::query(
+            "SELECT active_event_id FROM blocks WHERE chain_id = $1 AND hash = $2"
+        )
+        .bind(chain_id)
+        .bind(block_hash.as_slice())
+        .fetch_one(&pool)
+        .await
+        .expect("Failed to fetch block");
+
+        let active_event_id: Option<i64> = row.get("active_event_id");
+        assert_eq!(
+            active_event_id,
+            Some(event_id_2),
+            "Block's active_event_id should be the LAST event (event_id_2), not the first"
+        );
+
+        // Also verify it's NOT the first event
+        assert_ne!(
+            active_event_id,
+            Some(event_id_1),
+            "Block's active_event_id should NOT be the first event"
+        );
+    }
+}
