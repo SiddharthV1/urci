@@ -118,4 +118,12 @@ impl UrciTxEventKind {
             *self = UrciTxEventKind::UrciEvent(tx_event);
         }
     }
+
+    /// Get the inner UrciTxEvent regardless of variant
+    pub fn as_tx_event(&self) -> &UrciTxEvent {
+        match self {
+            UrciTxEventKind::UrciEvent(tx) => tx,
+            UrciTxEventKind::TraceRequest(tx) => tx,
+        }
+    }
 }

@@ -74,7 +74,12 @@ impl AdapterWriter for PostgresAdapter {
     #[instrument(skip(self, block), fields(
         block_number = %block.block_number,
         block_hash = %block.block_hash,
-        event_count = block.events.iter().map(|tx| tx.urc_events.len()).sum::<usize>(),
+        event_count = block.events.iter().map(|tx_kind| {
+            match tx_kind {
+                urci_common::UrciTxEventKind::UrciEvent(tx) => tx.urc_events.len(),
+                urci_common::UrciTxEventKind::TraceRequest(tx) => tx.urc_events.len(),
+            }
+        }).sum::<usize>(),
         reorged = block.reorged
     ))]
     async fn write_block(&mut self, mut block: UrciBlockUpdate) -> Result<B256> {

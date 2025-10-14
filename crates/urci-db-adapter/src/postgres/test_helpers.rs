@@ -2,8 +2,7 @@
 //!
 //! This module contains common test utilities used by both writer and reader tests.
 
-
-use alloy_primitives::{Address, B256, FixedBytes, U256};
+use alloy_primitives::{Address, FixedBytes, B256, U256};
 
 use testcontainers::{
     core::{ContainerPort, WaitFor},
@@ -12,10 +11,9 @@ use testcontainers::{
 };
 
 use urci_common::{
-    core::{UrciEvent, UrciEventKind, UrciBlockUpdate, UrciTxEvent},
+    core::{UrciBlockUpdate, UrciEvent, UrciEventKind, UrciTxEvent, UrciTxEventKind},
     OperatorRegistered,
 };
-
 
 pub async fn setup_test_db() -> (ContainerAsync<GenericImage>, String) {
     let image = GenericImage::new("timescale/timescaledb", "latest-pg15")
@@ -40,7 +38,6 @@ pub async fn setup_test_db() -> (ContainerAsync<GenericImage>, String) {
 
     (container, connection_string)
 }
-
 
 pub fn create_test_validation_result(
     registration_root: B256,
@@ -75,7 +72,6 @@ pub fn create_test_validation_result(
         }],
     }
 }
-
 
 /// Comprehensive test data structure with all event types
 pub struct TestFixture {
@@ -283,7 +279,7 @@ impl TestFixture {
     /// Compute work_id matching the database function:
     /// sha256('WORK_ID||V1' || be64(chain_id) || be64(height) || block_hash || COALESCE(parent_work_id, zeros))
     fn compute_work_id(&self, block: &UrciBlockUpdate) -> B256 {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let chain_id = 1i64; // Test chain ID
 
         let mut hasher = Sha256::new();
@@ -303,7 +299,10 @@ impl TestFixture {
     }
 
     /// Write all blocks from this fixture to the adapter in a single transaction
-    pub async fn write_to_adapter<W: crate::traits::AdapterWriter>(&self, adapter: &mut W) -> eyre::Result<()> {
+    pub async fn write_to_adapter<W: crate::traits::AdapterWriter>(
+        &self,
+        adapter: &mut W,
+    ) -> eyre::Result<()> {
         for block in &self.blocks {
             adapter.write_block(block.clone()).await?;
         }
@@ -393,10 +392,10 @@ fn create_registration_block(
         block_number,
         block_hash,
         parent_block_hash: parent_hash,
-        timestamp: 1700000000 + (block_number * 12), // Realistic: ~12s per block from Nov 2023
+        timestamp: 1700000000 + (block_number * 12),
         work_id: None,
         parent_work_id,
-        events: vec![tx_event],
+        events: vec![UrciTxEventKind::UrciEvent(tx_event)],
         reorged: false,
         system_error: None,
     }
@@ -451,10 +450,10 @@ fn create_collateral_block(
         block_number,
         block_hash,
         parent_block_hash: parent_hash,
-        timestamp: 1700000000 + (block_number * 12), // Realistic: ~12s per block from Nov 2023
+        timestamp: 1700000000 + (block_number * 12),
         work_id: None,
         parent_work_id,
-        events: vec![tx_event],
+        events: vec![UrciTxEventKind::UrciEvent(tx_event)],
         reorged: false,
         system_error: None,
     }
@@ -512,10 +511,10 @@ fn create_commitment_opt_in_block(
         block_number,
         block_hash,
         parent_block_hash: parent_hash,
-        timestamp: 1700000000 + (block_number * 12), // Realistic: ~12s per block from Nov 2023
+        timestamp: 1700000000 + (block_number * 12),
         work_id: None,
         parent_work_id,
-        events: vec![tx_event],
+        events: vec![UrciTxEventKind::UrciEvent(tx_event)],
         reorged: false,
         system_error: None,
     }
@@ -572,10 +571,10 @@ fn create_commitment_opt_out_block(
         block_number,
         block_hash,
         parent_block_hash: parent_hash,
-        timestamp: 1700000000 + (block_number * 12), // Realistic: ~12s per block from Nov 2023
+        timestamp: 1700000000 + (block_number * 12),
         work_id: None,
         parent_work_id,
-        events: vec![tx_event],
+        events: vec![UrciTxEventKind::UrciEvent(tx_event)],
         reorged: false,
         system_error: None,
     }
@@ -630,10 +629,10 @@ fn create_collateral_claimed_block(
         block_number,
         block_hash,
         parent_block_hash: parent_hash,
-        timestamp: 1700000000 + (block_number * 12), // Realistic: ~12s per block from Nov 2023
+        timestamp: 1700000000 + (block_number * 12),
         work_id: None,
         parent_work_id,
-        events: vec![tx_event],
+        events: vec![UrciTxEventKind::UrciEvent(tx_event)],
         reorged: false,
         system_error: None,
     }
@@ -713,10 +712,10 @@ fn create_slashing_block(
         block_number,
         block_hash,
         parent_block_hash: parent_hash,
-        timestamp: 1700000000 + (block_number * 12), // Realistic: ~12s per block from Nov 2023
+        timestamp: 1700000000 + (block_number * 12),
         work_id: None,
         parent_work_id,
-        events: vec![tx_event],
+        events: vec![UrciTxEventKind::UrciEvent(tx_event)],
         reorged: false,
         system_error: None,
     }
@@ -811,7 +810,7 @@ fn create_fraud_slashing_block(
         timestamp: 1700000000 + (block_number * 12),
         work_id: None,
         parent_work_id,
-        events: vec![tx_event],
+        events: vec![UrciTxEventKind::UrciEvent(tx_event)],
         reorged: false,
         system_error: None,
     }
@@ -944,7 +943,7 @@ fn create_commitment_slashing_block(
         timestamp: 1700000000 + (block_number * 12),
         work_id: None,
         parent_work_id,
-        events: vec![tx_event],
+        events: vec![UrciTxEventKind::UrciEvent(tx_event)],
         reorged: false,
         system_error: None,
     }
@@ -1097,7 +1096,7 @@ fn create_equivocation_slashing_block(
         timestamp: 1700000000 + (block_number * 12),
         work_id: None,
         parent_work_id,
-        events: vec![tx_event],
+        events: vec![UrciTxEventKind::UrciEvent(tx_event)],
         reorged: false,
         system_error: None,
     }
@@ -1151,15 +1150,14 @@ fn create_unregistration_block(
         block_number,
         block_hash,
         parent_block_hash: parent_hash,
-        timestamp: 1700000000 + (block_number * 12), // Realistic: ~12s per block from Nov 2023
+        timestamp: 1700000000 + (block_number * 12),
         work_id: None,
         parent_work_id,
-        events: vec![tx_event],
+        events: vec![UrciTxEventKind::UrciEvent(tx_event)],
         reorged: false,
         system_error: None,
     }
 }
-
 
 pub async fn setup_test_prerequisites(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::types::WorkId;
 use super::errors::SystemError;
-use super::urci_tx_event::UrciTxEvent;
+use super::urci_tx_event_kind::UrciTxEventKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UrciBlockUpdate {
@@ -15,7 +15,7 @@ pub struct UrciBlockUpdate {
     pub timestamp: u64,
     pub work_id: Option<WorkId>,
     pub parent_work_id: Option<WorkId>,
-    pub events: Vec<UrciTxEvent>,
+    pub events: Vec<UrciTxEventKind>,
     pub reorged: bool,
     // System error encountered during event extraction
     // If present, indexer should flip to failed state

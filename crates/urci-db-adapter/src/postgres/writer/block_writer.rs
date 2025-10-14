@@ -196,7 +196,25 @@ impl PostgresAdapter {
         debug!("Block inserted successfully");
 
         // Now process transactions and events
-        for (tx_idx, tx_events) in block.events.iter().enumerate() {
+        for (tx_idx, tx_event_kind) in block.events.iter().enumerate() {
+            use urci_common::UrciTxEventKind;
+
+            // Match on the enum to get the underlying UrciTxEvent
+            let tx_events = match tx_event_kind {
+                UrciTxEventKind::UrciEvent(tx) => tx,
+                UrciTxEventKind::TraceRequest(tx) => {
+                    // TraceRequest reaching db_adapter means trace enrichment failed
+                    // This should have been caught by BatchProcessor and written to failed_block_writes
+                    // But handle it gracefully here as well
+                    error!(
+                        tx_index = tx_idx,
+                        tx_hash = %tx.transaction_hash,
+                        "TraceRequest reached db_adapter without enrichment - this should have been caught earlier"
+                    );
+                    tx
+                }
+            };
+
             debug!(
                 tx_index = tx_idx,
                 tx_hash = %tx_events.transaction_hash,
@@ -1447,6 +1465,7 @@ mod tests {
             .events
             .first()
             .expect("Block should have tx")
+            .as_tx_event()
             .transaction_hash;
 
         adapter

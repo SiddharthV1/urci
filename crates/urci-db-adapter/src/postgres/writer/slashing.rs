@@ -404,16 +404,18 @@ impl PostgresAdapter {
             .execute(tx.as_mut())
             .await?;
 
-        // Mark the operator's commitment as slashed
-        sqlx::query(
-            "UPDATE operator_slasher_commitment
-             SET slashed = TRUE
-             WHERE registration_root = $1 AND chain_id = $2",
-        )
-        .bind(event.registrationRoot.as_slice())
-        .bind(self.chain_id)
-        .execute(tx.as_mut())
-        .await?;
+        // Mark the operator's commitment as slashed (ONLY for SlasherCommitment type)
+        // This matches Registry.sol line 354 which only sets slasherCommitment.slashed = true
+        // for the slashCommitment(bytes32, SignedCommitment, bytes) variant.
+        // Other slash types (Fraud, Commitment with delegation, Equivocation) do NOT set this flag.
+        if let urci_common::SlashingCall::SlasherCommitment { commitment, .. } = &call {
+            sqlx::query(sql_constants::UPDATE_OPERATOR_SLASHER_COMMITMENT_SLASHED)
+                .bind(event.registrationRoot.as_slice())
+                .bind(self.chain_id)
+                .bind(commitment.commitment.slasher.as_slice())
+                .execute(tx.as_mut())
+                .await?;
+        }
 
         Ok(())
     }
@@ -452,7 +454,7 @@ mod tests {
         // Count expected slashing events from fixture data
         let expected_count = fixture.blocks.iter()
             .flat_map(|b| &b.events)
-            .flat_map(|tx| &tx.urc_events)
+            .flat_map(|tx_kind| &tx_kind.as_tx_event().urc_events)
             .filter(|e| matches!(e.event, urci_common::UrciEventKind::Slashing(..)))
             .count();
 
@@ -504,7 +506,7 @@ mod tests {
         // Extract expected values from fixture
         let expected_slash_amount = fixture.blocks.iter()
             .flat_map(|b| &b.events)
-            .flat_map(|tx| &tx.urc_events)
+            .flat_map(|tx_kind| &tx_kind.as_tx_event().urc_events)
             .find_map(|e| match &e.event {
                 urci_common::UrciEventKind::Slashing(_event, amount, _call) => Some(*amount),
                 _ => None,
@@ -513,7 +515,7 @@ mod tests {
 
         let initial_collateral = fixture.blocks.iter()
             .flat_map(|b| &b.events)
-            .flat_map(|tx| &tx.urc_events)
+            .flat_map(|tx_kind| &tx_kind.as_tx_event().urc_events)
             .find_map(|e| match &e.event {
                 urci_common::UrciEventKind::Registration(_addr, event, _result) => Some(event.collateralWei),
                 _ => None,
@@ -614,7 +616,7 @@ mod tests {
         // Extract expected slash amount
         let expected_slash_amount = fixture.blocks.iter()
             .flat_map(|b| &b.events)
-            .flat_map(|tx| &tx.urc_events)
+            .flat_map(|tx_kind| &tx_kind.as_tx_event().urc_events)
             .find_map(|e| match &e.event {
                 urci_common::UrciEventKind::Slashing(_event, amount, _call) => Some(*amount),
                 _ => None,
@@ -696,7 +698,7 @@ mod tests {
         // Extract expected slash amount
         let expected_slash_amount = fixture.blocks.iter()
             .flat_map(|b| &b.events)
-            .flat_map(|tx| &tx.urc_events)
+            .flat_map(|tx_kind| &tx_kind.as_tx_event().urc_events)
             .find_map(|e| match &e.event {
                 urci_common::UrciEventKind::Slashing(_event, amount, _call) => Some(*amount),
                 _ => None,
@@ -791,7 +793,7 @@ mod tests {
         // Extract expected slash amount
         let expected_slash_amount = fixture.blocks.iter()
             .flat_map(|b| &b.events)
-            .flat_map(|tx| &tx.urc_events)
+            .flat_map(|tx_kind| &tx_kind.as_tx_event().urc_events)
             .find_map(|e| match &e.event {
                 urci_common::UrciEventKind::Slashing(_event, amount, _call) => Some(*amount),
                 _ => None,
