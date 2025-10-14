@@ -1,0 +1,78 @@
+[package]
+name = "urci-indexer"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "urci-indexer"
+path = "src/main.rs"
+
+[dependencies]
+# Local dependencies
+urci-common = { path = "../urci-common" }
+urci-db-adapter = { path = "../urci-db-adapter" }
+urci-bls-merkle = { path = "../urci-bls-merkle" }
+urci-tracing = { path = "../urci-tracing" }
+
+# Reth dependencies - all from workspace
+reth = { workspace = true }
+reth-chainspec = { workspace = true }
+reth-cli = { workspace = true }
+reth-ethereum = { workspace = true }
+reth-ethereum-primitives = { workspace = true }
+reth-evm = { workspace = true }
+reth-evm-ethereum = { workspace = true }
+reth-exex = { workspace = true }
+reth-node-api = { workspace = true }
+reth-node-builder = { workspace = true }
+reth-node-ethereum = { workspace = true }
+reth-primitives = { workspace = true }
+reth-primitives-traits = { workspace = true }
+reth-provider = { workspace = true }
+reth-revm = { workspace = true }
+reth-rpc-convert = { workspace = true }
+reth-rpc-eth-api = { workspace = true }
+reth-storage-api = { workspace = true }
+reth-tracing = { workspace = true }
+reth-tasks = { workspace = true }
+reth-transaction-pool = { workspace = true }
+reth-execution-types = { workspace = true }
+
+# Revm dependencies - from workspace
+revm = { workspace = true }
+revm-inspectors = { workspace = true }
+
+# Alloy dependencies - from workspace
+alloy-eips = { workspace = true }
+alloy-genesis = { workspace = true }
+alloy-primitives = { workspace = true }
+alloy-rpc-types-eth = { workspace = true }
+alloy-sol-types = { workspace = true }
+alloy-consensus = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Error handling
+eyre = { workspace = true }
+
+# Tracing
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
