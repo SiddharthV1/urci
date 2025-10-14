@@ -156,7 +156,7 @@ mod tests {
         // Count expected opt-in events from fixture data
         let expected_count = fixture.blocks.iter()
             .flat_map(|b| &b.events)
-            .flat_map(|tx| &tx.urc_events)
+            .flat_map(|tx_kind| &tx_kind.as_tx_event().urc_events)
             .filter(|e| matches!(e.event, urci_common::UrciEventKind::OptIn(_)))
             .count();
 

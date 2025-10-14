@@ -130,11 +130,8 @@ impl UrciBlockRangeUpdate {
                         .await
                         {
                             Ok(tx_event_kind) => {
-                                let tx_event = match tx_event_kind {
-                                    UrciTxEventKind::UrciEvent(evt) => evt,
-                                    UrciTxEventKind::TraceRequest(evt) => evt,
-                                };
-                                block_events.push(tx_event);
+                                // TraceRequest will be enriched later by BatchProcessor
+                                block_events.push(tx_event_kind);
                             }
                             Err(system_error) => {
                                 // SystemError encountered - return block with error, no events

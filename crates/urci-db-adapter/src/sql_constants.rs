@@ -180,6 +180,21 @@ pub const INSERT_OPERATOR_SLASHER_COMMITMENT_OPTOUT_SELECT: &str =
      ORDER BY created_at DESC
      LIMIT 1";
 
+/// Mark operator's commitment as slashed (ONLY for SlasherCommitment type)
+/// This matches Registry.sol line 354 which only sets slasherCommitment.slashed = true
+/// for the slashCommitment(bytes32, SignedCommitment, bytes) variant (on-chain opt-in).
+/// $1 = registration_root
+/// $2 = chain_id
+/// $3 = slasher_address
+pub const UPDATE_OPERATOR_SLASHER_COMMITMENT_SLASHED: &str =
+    "UPDATE operator_slasher_commitment
+     SET slashed = TRUE
+     WHERE registration_root = $1 AND chain_id = $2
+       AND slasher_id = (
+         SELECT id FROM slasher
+         WHERE address = $3 AND chain_id = $2
+       )";
+
 // ============================================================================
 // WRITER STATUS TABLE
 // ============================================================================

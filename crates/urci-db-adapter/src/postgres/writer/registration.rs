@@ -188,8 +188,8 @@ mod tests {
         let block_1 = create_test_block_with_event(1, None);
 
         // Extract registration_root and expected_leaf_count from the block's event data
-        let (registration_root, expected_leaf_count): (alloy_primitives::B256, usize) = if let Some(tx_event) = block_1.events.first() {
-            if let Some(urc_event) = tx_event.urc_events.first() {
+        let (registration_root, expected_leaf_count): (alloy_primitives::B256, usize) = if let Some(tx_event_kind) = block_1.events.first() {
+            if let Some(urc_event) = tx_event_kind.as_tx_event().urc_events.first() {
                 match &urc_event.event {
                     urci_common::UrciEventKind::Registration(_, event, validation_result) => {
                         let leaf_count = validation_result.as_ref()

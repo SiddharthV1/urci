@@ -69,7 +69,7 @@ mod tests {
         // OptOut events create 1 NEW commitment record each (with opted_out_at set)
         let expected_count = fixture.blocks.iter()
             .flat_map(|b| &b.events)
-            .flat_map(|tx| &tx.urc_events)
+            .flat_map(|tx_kind| &tx_kind.as_tx_event().urc_events)
             .filter(|e| matches!(e.event, urci_common::UrciEventKind::OptIn(_) | urci_common::UrciEventKind::OptOut(_)))
             .count();
 
