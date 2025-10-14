@@ -63,8 +63,8 @@ where
                 healed_range.from, healed_range.to
             );
 
-            // Process healed blocks using BatchProcessor
-            let mut processor = BatchProcessor::new(last_work_id, start_height);
+            // Process healed blocks using BatchProcessor with trace enrichment
+            let mut processor = BatchProcessor::new(last_work_id, start_height, tracer.clone());
             let healed_stream = healed_range.into_blocks_stream();
 
             super::batch_processor::process_block_stream(healed_stream, &mut processor, adapter)

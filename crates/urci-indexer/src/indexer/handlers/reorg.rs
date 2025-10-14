@@ -5,6 +5,7 @@ use eyre::Result;
 use tracing::{info, warn};
 use urci_common::UrciBlockRangeUpdate;
 use urci_db_adapter::{AdapterWriter, PostgresAdapter};
+use urci_tracing::UrciTracer;
 
 use crate::indexer::batch_processor::{process_block_stream, BatchProcessor};
 
@@ -14,13 +15,31 @@ use crate::indexer::batch_processor::{process_block_stream, BatchProcessor};
 /// 1. Mark old chain as non-canonical
 /// 2. Process new canonical chain
 /// 3. Apply consensus finalization
-pub async fn handle_reorg(
+pub async fn handle_reorg<EthApi>(
     from: (u64, B256),
     to: (u64, B256),
     new_chain: UrciBlockRangeUpdate,
     adapter: &mut PostgresAdapter,
+    tracer: &UrciTracer<EthApi>,
     chain_id_i64: i64,
-) -> Result<()> {
+) -> Result<()>
+where
+    EthApi: reth_rpc_eth_api::helpers::FullEthApi
+        + reth_rpc_eth_api::helpers::LoadBlock
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <EthApi::NetworkTypes as reth_rpc_convert::RpcTypes>::TransactionRequest:
+        From<alloy_rpc_types_eth::TransactionRequest>,
+    <EthApi as reth_rpc_eth_api::node::RpcNodeCore>::Provider:
+        reth_storage_api::BlockReader + reth_storage_api::ReceiptProvider,
+    <EthApi as reth_rpc_eth_api::node::RpcNodeCore>::Primitives:
+        reth_primitives_traits::node::NodePrimitives<
+            Block = reth_primitives::Block,
+            Receipt = reth_ethereum_primitives::EthereumReceipt,
+        >,
+{
     info!(
         "Indexer handling reorg: marking blocks {} to {} as non-canonical",
         from.0, to.0
@@ -47,7 +66,7 @@ pub async fn handle_reorg(
     // Process new canonical blocks
     // Note: For reorg blocks, we don't skip parent_work_id even if at start_height
     // because these are replacing an existing chain
-    let mut processor = BatchProcessor::new(Some(parent_work_id), 0);
+    let mut processor = BatchProcessor::new(Some(parent_work_id), 0, tracer.clone());
     let stream = new_chain.into_blocks_stream();
     process_block_stream(stream, &mut processor, adapter).await?;
 

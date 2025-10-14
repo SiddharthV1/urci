@@ -76,7 +76,7 @@ where
                 .await
             }
             UrciBlockRangeUpdateKind::Reorg { from, to, new_chain } => {
-                handle_reorg(from, to, new_chain, &mut adapter, chain_id_i64).await
+                handle_reorg(from, to, new_chain, &mut adapter, &tracer, chain_id_i64).await
             }
             UrciBlockRangeUpdateKind::Revert { from, to } => {
                 handle_revert(from, to, &mut adapter).await

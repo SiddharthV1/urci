@@ -99,8 +99,8 @@ where
         }
     }
 
-    // Process incoming blocks
-    let mut processor = BatchProcessor::new(last_work_id, start_height);
+    // Process incoming blocks with trace enrichment
+    let mut processor = BatchProcessor::new(last_work_id, start_height, tracer.clone());
     let stream = range_update.into_blocks_stream();
     process_block_stream(stream, &mut processor, adapter).await?;
 
